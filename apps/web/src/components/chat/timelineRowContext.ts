@@ -1,0 +1,239 @@
+import type { ToolCallDiffTarget } from "../../diffPanelStore";
+import type { SideThreadOpenIntent } from "@dacre/client-runtime/side-thread";
+import type { ChildThreadApproval } from "@dacre/client-runtime/state/thread-requests";
+import type { ThreadRunSummary } from "@dacre/client-runtime/state/models";
+import {
+  type ProviderApprovalDecision,
+  type ResponseContextRecord,
+  type RuntimeRequestId,
+  type WorktreeSetupSnapshot,
+  type EnvironmentId,
+  type MessageId,
+  type ModelSelection,
+  type OrchestrationV2TurnItem,
+  type RunAttemptId,
+  type ScopedThreadRef,
+  type ServerProviderSkill,
+  type RunId,
+  ThreadId,
+  type TurnItemId,
+} from "@dacre/contracts";
+import type { AsyncResult, Atom } from "effect/reactivity";
+import type { CommandOutputView } from "@dacre/client-runtime/state/command-output";
+import type { WorkflowOpening } from "@dacre/client-runtime/state/subagentRuntime";
+import { useEffect, useRef, createContext, type MouseEvent, type ReactNode } from "react";
+import { type LegendListRef } from "@legendapp/list/react";
+import type { CodexArtifactTemplate } from "@dacre/shared/codexArtifactTemplates";
+import type { PendingApproval } from "../../session-logic";
+import { type ChatFileAttachment } from "../../types";
+import { type ExpandedImageItem, ExpandedImagePreview } from "./ExpandedImagePreview";
+import { type AssistantCitationTarget } from "./AssistantCitationSource";
+import {
+  type MessagesTimelineRow,
+  type WorkGroupScrollAnchor,
+  type wakeUpsRailRows,
+} from "./MessagesTimeline.logic";
+import { type TimestampFormat } from "@dacre/contracts/settings";
+import type { TurnItemDetailSource } from "../../state/queries";
+import { type HandoffTimelineRun } from "./V2LifecycleRow";
+
+/**
+ * Where an expanded row reads an item's detail and a command's output. The owner's rows read them
+ * from the environment; the guest page reads them through its own routes.
+ */
+export interface TurnItemSource {
+  readonly detail: TurnItemDetailSource;
+  /** Unset where output does not stream: a command row then shows the output its detail holds. */
+  readonly commandOutput?: (target: {
+    readonly threadId: ThreadId;
+    readonly itemId: TurnItemId;
+  }) => Atom.Atom<AsyncResult.AsyncResult<CommandOutputView, unknown>>;
+}
+
+export interface TimelineRowSharedState {
+  citationRequest: AssistantCitationTarget | null;
+  /** Absent hides "Reply", as in the guest view. */
+  onReplyToResponse: ((response: ResponseContextRecord) => boolean) | undefined;
+  listRef: React.RefObject<LegendListRef | null>;
+  timestampFormat: TimestampFormat;
+  routeThreadKey: string;
+  threadRef: ScopedThreadRef | null;
+  markdownCwd: string | undefined;
+  resolvedTheme: "light" | "dark";
+  workspaceRoot: string | undefined;
+  skills: ReadonlyArray<ServerProviderSkill>;
+  runs: ReadonlyArray<HandoffTimelineRun>;
+  activeThreadEnvironmentId: EnvironmentId;
+  onRevertToTurnCount: (targetTurnCount: number, messageId: MessageId) => void;
+  onUseArtifactTemplate: (template: CodexArtifactTemplate) => void;
+  onSendAppMessage: ((text: string) => Promise<void>) | undefined;
+  onAppFullscreenChange: (rowId: string, fullscreen: boolean) => void;
+  onRunShellCommand: ((command: string) => void) | undefined;
+  findActive: boolean;
+  onImageExpand: (preview: ExpandedImagePreview) => void;
+  displayThreadKey?: string;
+  onOpenToolDiff: ((target: ToolCallDiffTarget) => void) | undefined;
+  /** Unset where there is no diff to open, so the timeline shows no "Open diff" button. */
+  onOpenTurnDiff: ((runId: RunId, filePath?: string) => void) | undefined;
+  /**
+   * Draws a published HTML visual. Unset, the row loads it from the environment; the guest page
+   * loads it through its own route.
+   */
+  renderHtmlRender: ((row: Extract<TimelineRow, { kind: "html-render" }>) => ReactNode) | undefined;
+  /** Unset, expanded rows read detail and command output from the environment. */
+  turnItemSource: TurnItemSource | undefined;
+  onOpenThread: (
+    threadId: OrchestrationV2TurnItem["threadId"],
+    environmentId?: EnvironmentId,
+    /** How the click asked to open a subagent or side chat; a plain click when absent. */
+    intent?: SideThreadOpenIntent,
+  ) => void;
+  workflowOpening: WorkflowOpening | null;
+  /** Absent hides "Fork from this response", as in the guest view. */
+  onForkFromRun:
+    | ((input: { readonly sourceThreadId: ThreadId; readonly runId: RunId }) => Promise<void>)
+    | undefined;
+  /** Absent hides "Second opinion". Starts a review side chat; false when none started. */
+  onSecondOpinion:
+    | ((input: {
+        readonly modelSelection: ModelSelection;
+        readonly text: string;
+      }) => Promise<boolean>)
+    | undefined;
+  /** Why "Second opinion" cannot start a side chat now. */
+  secondOpinionDisabledReason: string | null;
+  onToggleTurnFold: (runId: RunId) => void;
+  onToggleAttemptFold: (attemptId: RunAttemptId) => void;
+  onFileOpen: (attachment: ChatFileAttachment) => void;
+  onFileDownload: (attachment: ChatFileAttachment) => void;
+  openPullRequest: (event: MouseEvent<HTMLElement>, url: string) => void;
+  onToggleWorkGroup: (groupId: string, anchorKey: string) => void;
+  onToggleWorkEntry: (anchorKey: string, collapsed: boolean, entryId?: string) => void;
+  onWorkEntryContentReady?: (anchorKey: string, entryId: string) => void;
+  onCancelWorktreeSetup: (() => void) | null;
+  retryableWorkspacePreparationRunIds: ReadonlySet<RunId>;
+  onRetryWorkspacePreparation: ((runId: RunId) => void) | null;
+  onWorktreeSetupWorkLocally: (() => void) | null;
+  onOpenWorktreeSetupTerminal: ((terminalId: string) => void) | null;
+  onToggleWorkingHistory: (key: string) => void;
+  onWorkingHistoryMoving: (moving: boolean) => void;
+  onWorkingHistorySettled: () => void;
+  onFocusComposer: (() => void) | null;
+  workGroupViewState: WorkGroupViewState;
+}
+
+export interface TimelineRowActivityState {
+  isWorking: boolean;
+  isCompacting: boolean;
+  isRevertingCheckpoint: boolean;
+  turnEnded: boolean;
+  activeTurnStartedAt: string | null;
+  awaitingUser: boolean;
+  isPreparingWorktree: boolean;
+  providerStartingLabel: string | null;
+  providerStarting: NonNullable<ThreadRunSummary["providerStarting"]> | null;
+  latestRunId: RunId | null;
+  /** The worktree setup of the live turn, drawn as the working row's first rows. */
+  worktreeSetup: WorktreeSetupSnapshot | null;
+  liveAnswerPreview: string | null;
+  /** The approval or question the running turn waits on; it pauses the clock. */
+  pendingRequest: TimelinePendingRequest | null;
+  /** Background work that outlived the latest turn, named on its fold. */
+  usageLimit: TimelineUsageLimit | null;
+  /** The latest run's error as the composer banner shows it. */
+  threadErrorMessage: string | null;
+}
+
+export interface TimelineApprovalState {
+  readonly pendingApprovals: ReadonlyMap<RuntimeRequestId, PendingApproval>;
+  /** First live, unheld approval in timeline order: owns document-level Enter/Escape shortcuts. */
+  readonly activeShortcutRequestId: RuntimeRequestId | null;
+  readonly respondingRequestIds: ReadonlyArray<RuntimeRequestId>;
+  readonly resolvedApprovalDecisions: ReadonlyMap<RuntimeRequestId, ProviderApprovalDecision>;
+  readonly childApprovalsByThreadKey: ReadonlyMap<string, ReadonlyArray<ChildThreadApproval>>;
+  readonly canOperateThread: boolean;
+  readonly onRespondToApproval:
+    | ((requestId: RuntimeRequestId, decision: ProviderApprovalDecision) => Promise<unknown>)
+    | undefined;
+  readonly onApprovalAnswered: (() => void) | null;
+}
+
+const DEFAULT_TIMELINE_APPROVAL_STATE: TimelineApprovalState = {
+  pendingApprovals: new Map(),
+  activeShortcutRequestId: null,
+  respondingRequestIds: [],
+  resolvedApprovalDecisions: new Map(),
+  childApprovalsByThreadKey: new Map(),
+  canOperateThread: false,
+  onRespondToApproval: undefined,
+  onApprovalAnswered: null,
+};
+
+export const TimelineRowCtx = createContext<TimelineRowSharedState>(null!);
+
+export const TimelineRowActivityCtx = createContext<TimelineRowActivityState>(null!);
+
+/** Approval state for timeline cards and answered rows; changes never re-render other rows. */
+export const TimelineApprovalCtx = createContext<TimelineApprovalState>(
+  DEFAULT_TIMELINE_APPROVAL_STATE,
+);
+
+/** Rows an open wake-ups fold reveals, by id. Its own context: it changes only when a fold does. */
+export const TimelineWakeUpsRailCtx = createContext<ReturnType<typeof wakeUpsRailRows>>(new Map());
+
+export const TimelineWakeUpsRailInteractionCtx = createContext<{
+  hoveredFoldId: string | null;
+  onHover: (foldId: string | null) => void;
+  onCollapse: (foldId: string) => void;
+}>(null!);
+
+export interface WorkGroupViewState {
+  scrollPositions: Map<string, WorkGroupScrollAnchor>;
+  expandedEntries: Set<string>;
+}
+
+/** One image the group's agent viewed; `item` is null until its URL resolves. */
+export interface WorkGroupViewedImage {
+  readonly path: string;
+  readonly item: ExpandedImageItem | null;
+}
+
+export const WorkGroupViewCtx = createContext<{
+  state: WorkGroupViewState;
+  viewedImages: ReadonlyArray<WorkGroupViewedImage>;
+  onToggleEntry: (collapsed: boolean, entryId: string) => void;
+  onContentReady?: ((entryId: string) => void) | undefined;
+} | null>(null);
+
+export type TimelineWorkEntry = Extract<
+  MessagesTimelineRow,
+  { kind: "work" }
+>["groupedEntries"][number];
+
+export type TimelineRow = MessagesTimelineRow;
+
+export function useInitialOutputReady(pending: boolean, onReady: (() => void) | undefined) {
+  const notified = useRef(false);
+  // oxlint-disable-next-line dacre/no-unreasoned-state-sync -- reveals a disclosure after its first async output commits
+  useEffect(() => {
+    if (!pending && !notified.current) {
+      notified.current = true;
+      onReady?.();
+    }
+  }, [pending, onReady]);
+}
+
+/** The latest run stopped at a usage limit; its fold offers to snooze until the reset. */
+export interface TimelineUsageLimit {
+  readonly runId: RunId;
+  readonly resetAt: string | null;
+  readonly snoozed: boolean;
+  readonly onToggleSnooze: (() => void) | null;
+}
+
+export interface TimelinePendingRequest {
+  readonly kind: "approval" | "question";
+  readonly label: string;
+  readonly createdAt: string;
+  readonly blocking?: boolean;
+}

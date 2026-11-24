@@ -1,0 +1,445 @@
+import { msg } from "gt-react";
+import { managedCapabilityDenial } from "@dacre/client-runtime/contract-labels";
+import { useAuth } from "@clerk/react";
+import { Link } from "@tanstack/react-router";
+import { AgentFeedbackMode } from "@dacre/contracts";
+import { T, useGT, useMessages } from "gt-react";
+
+import { hasCloudPublicConfig } from "~/cloud/publicConfig";
+import { useDacreConnectAuthPrompt } from "../clerk/useDacreConnectAuthPrompt";
+import { Button, InlineButton } from "../ui/button";
+import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
+import { Switch } from "../ui/switch";
+import { ScopedSwitch } from "./ScopedSwitch";
+import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
+import { useSearchableSetting } from "./settingsSearch";
+import {
+  useScopedSettings,
+  useScopedSettingsMixed,
+  useUpdateScopedSettings,
+} from "./useScopedSettings";
+import { useOptionalSettingsScope, useSettingsScope } from "./SettingsScopeContext";
+import { firstManagedDenial, usePrimaryManagedPolicy } from "~/state/managedPolicy";
+
+/** Features still settling in. */
+export function LabsSettingsPanel() {
+  const gt = useGT();
+  return (
+    <SettingsPageContainer>
+      <SettingsSection id="beta" title={gt("Beta")}>
+        <BoringSidebarRow />
+        {/* Clerk is only mounted when this build has Dacre Connect. */}
+        {hasCloudPublicConfig() ? <GuestLinksRowWithSignIn /> : <GuestLinksRow />}
+        <LinkedEnvironmentsRow />
+        <WorkflowsRow />
+        <PromptSuggestionsRow />
+        <SimlockHostsRow />
+        <FastWorktreeCheckoutRow />
+        <AgentFeedbackRow />
+      </SettingsSection>
+      <SettingsSection
+        id="redesign"
+        title={gt("Redesign", { $context: "settings section, labs features of the redesign" })}
+      >
+        <ScrollingWorkspacesRow />
+        <TurnWorkFoldRow />
+      </SettingsSection>
+    </SettingsPageContainer>
+  );
+}
+
+function ScrollingWorkspacesRow() {
+  const searchableSetting = useSearchableSetting();
+  const gt = useGT();
+  const settings = useScopedSettings();
+  const updateSettings = useUpdateScopedSettings();
+  return (
+    <SettingsRow
+      {...searchableSetting("scrolling-workspaces")}
+      description={gt(
+        "Panes scroll sideways instead of shrinking, and you can keep several workspaces with an overview, swipes and a layout tour. Splits, tabs and layout templates work either way.",
+      )}
+      control={
+        <Switch
+          checked={settings.scrollingWorkspacesEnabled}
+          onCheckedChange={(checked) =>
+            updateSettings({ scrollingWorkspacesEnabled: Boolean(checked) })
+          }
+          aria-label={gt("Scrolling workspaces")}
+        />
+      }
+    />
+  );
+}
+
+function TurnWorkFoldRow() {
+  const searchableSetting = useSearchableSetting();
+  const gt = useGT();
+  const settings = useScopedSettings();
+  const updateSettings = useUpdateScopedSettings();
+  return (
+    <SettingsRow
+      {...searchableSetting("turn-work-fold")}
+      description={gt(
+        "Gather a running turn's tool calls and notes under one Working line that folds into its Worked for row when the turn ends, with the tool calls inside shown open.",
+      )}
+      control={
+        <Switch
+          checked={settings.turnWorkFoldEnabled}
+          onCheckedChange={(checked) => updateSettings({ turnWorkFoldEnabled: Boolean(checked) })}
+          aria-label={gt("Fold each turn's work")}
+        />
+      }
+    />
+  );
+}
+
+function BoringSidebarRow() {
+  const searchableSetting = useSearchableSetting();
+  const settings = useScopedSettings();
+  const updateSettings = useUpdateScopedSettings();
+  const gt = useGT();
+  return (
+    <SettingsRow
+      {...searchableSetting("boring-sidebar")}
+      description={gt(
+        "Group sidebar threads into project folders. Pinned threads stay on top, and Snoozed and Settled stay below the folders.",
+      )}
+      control={
+        <Switch
+          checked={settings.boringSidebarEnabled}
+          onCheckedChange={(checked) => updateSettings({ boringSidebarEnabled: Boolean(checked) })}
+          aria-label={gt("Boring sidebar (group by project)")}
+        />
+      }
+    >
+      {settings.boringSidebarEnabled ? (
+        <div className="mt-2 mb-2 border-l-2 border-border/60 ps-3">
+          <BoringSidebarMultilineRow />
+        </div>
+      ) : null}
+    </SettingsRow>
+  );
+}
+
+function BoringSidebarMultilineRow() {
+  const searchableSetting = useSearchableSetting();
+  const settings = useScopedSettings();
+  const updateSettings = useUpdateScopedSettings();
+  const gt = useGT();
+  return (
+    <SettingsRow
+      {...searchableSetting("boring-sidebar-multiline")}
+      className="px-0 py-2 sm:px-0"
+      description={gt(
+        "Show folder threads on two lines: the title, then the branch, pull request, and agent.",
+      )}
+      control={
+        <Switch
+          checked={settings.boringSidebarMultilineRows}
+          onCheckedChange={(checked) =>
+            updateSettings({ boringSidebarMultilineRows: Boolean(checked) })
+          }
+          aria-label={gt("Two-line folder rows")}
+        />
+      }
+    />
+  );
+}
+
+/** Signed out of Dacre Connect, the row offers to sign in instead of its switch. */
+function GuestLinksRowWithSignIn() {
+  const searchableSetting = useSearchableSetting();
+  const gt = useGT();
+  const { isSignedIn } = useAuth();
+  const { openAuthPrompt } = useDacreConnectAuthPrompt();
+  // `isSignedIn` is undefined until Clerk loads.
+  if (isSignedIn !== false) return <GuestLinksRow />;
+  return (
+    <SettingsRow
+      {...searchableSetting("guest-links")}
+      description={gt(
+        "Share a thread with a guest who watches it live in a browser and sends messages you approve. Sign in to Dacre Connect to use guest links.",
+      )}
+      control={
+        <Button size="sm" variant="secondary" onClick={openAuthPrompt}>
+          <T>Sign in</T>
+        </Button>
+      }
+    />
+  );
+}
+
+function GuestLinksRow() {
+  const searchableSetting = useSearchableSetting();
+  const settings = useScopedSettings();
+  const updateSettings = useUpdateScopedSettings();
+  const gt = useGT();
+  const messages = useMessages();
+  const scope = useOptionalSettingsScope();
+  const primaryPolicy = usePrimaryManagedPolicy();
+  // Guests arrive through Dacre Connect, so a policy that turns Connect off turns this off too.
+  const connectDenial = firstManagedDenial(
+    scope
+      ? scope.connectedEnvironments.map((environment) => environment.serverConfig?.managedPolicy)
+      : [primaryPolicy],
+    (policy) => managedCapabilityDenial(policy, "connect", messages),
+  );
+  return (
+    <SettingsRow
+      serverScoped
+      {...searchableSetting("guest-links")}
+      settingKeys={["guestSharingEnabled"]}
+      // Turning guest links off still works without Dacre Connect.
+      managed={settings.guestSharingEnabled ? undefined : connectDenial}
+      // oxlint-disable-next-line dacre/max-settings-description-length -- four characters over since the rename; rewording would discard nine translations
+      description={
+        <T>
+          Share a thread with a guest who watches it live in a browser and sends messages you
+          approve. Needs Dacre Connect: sign in and link this machine in{" "}
+          <InlineButton render={<Link to="/settings/access" />}>Sharing & access</InlineButton>.
+          Turning it off stops every guest link.
+        </T>
+      }
+      control={
+        <ScopedSwitch
+          settingKeys={["guestSharingEnabled"]}
+          checked={settings.guestSharingEnabled}
+          onCheckedChange={(checked) => updateSettings({ guestSharingEnabled: Boolean(checked) })}
+          aria-label={gt("Guest links")}
+        />
+      }
+    />
+  );
+}
+
+function LinkedEnvironmentsRow() {
+  const searchableSetting = useSearchableSetting();
+  const settings = useScopedSettings();
+  const updateSettings = useUpdateScopedSettings();
+  const gt = useGT();
+  return (
+    <SettingsRow
+      serverScoped
+      {...searchableSetting("linked-environments-beta")}
+      settingKeys={["linkedEnvironmentsEnabled"]}
+      description={
+        <T>
+          Let agents here work on your other machines, and theirs here. Turn it on for each machine,
+          then link them in{" "}
+          <InlineButton render={<Link to="/settings/connections" />}>Connections</InlineButton>.
+          While off, nothing new starts over a link; running tasks finish.
+        </T>
+      }
+      control={
+        <ScopedSwitch
+          settingKeys={["linkedEnvironmentsEnabled"]}
+          checked={settings.linkedEnvironmentsEnabled}
+          onCheckedChange={(checked) =>
+            updateSettings({ linkedEnvironmentsEnabled: Boolean(checked) })
+          }
+          aria-label={gt("Linked environments")}
+        />
+      }
+    />
+  );
+}
+
+function WorkflowsRow() {
+  const searchableSetting = useSearchableSetting();
+  const settings = useScopedSettings();
+  const updateSettings = useUpdateScopedSettings();
+  const gt = useGT();
+  return (
+    <SettingsRow
+      serverScoped
+      {...searchableSetting("workflows-beta")}
+      settingKeys={["workflowsEnabled"]}
+      description={gt(
+        "Run multi-step workflows from files in the workflows folder of this server's Dacre home. Open them from the command palette. While off, nothing in that folder runs; runs wait until it is on again.",
+      )}
+      control={
+        <ScopedSwitch
+          settingKeys={["workflowsEnabled"]}
+          checked={settings.workflowsEnabled}
+          onCheckedChange={(checked) => updateSettings({ workflowsEnabled: Boolean(checked) })}
+          aria-label={gt("Workflows")}
+        />
+      }
+    />
+  );
+}
+
+function PromptSuggestionsRow() {
+  const searchableSetting = useSearchableSetting();
+  const settings = useScopedSettings();
+  const updateSettings = useUpdateScopedSettings();
+  const gt = useGT();
+  return (
+    <SettingsRow
+      serverScoped
+      {...searchableSetting("prompt-suggestions-beta")}
+      settingKeys={["promptSuggestionsEnabled"]}
+      description={gt(
+        "Show a predicted next message in the empty composer after a Claude or Codex turn. Tab uses it. Each is an extra cached request on your plan. Needs Codex 0.165+. Claude threads update on restart.",
+      )}
+      control={
+        <ScopedSwitch
+          settingKeys={["promptSuggestionsEnabled"]}
+          checked={settings.promptSuggestionsEnabled}
+          onCheckedChange={(checked) =>
+            updateSettings({ promptSuggestionsEnabled: Boolean(checked) })
+          }
+          aria-label={gt("Suggest next prompt")}
+        />
+      }
+    />
+  );
+}
+
+function SimlockHostsRow() {
+  const searchableSetting = useSearchableSetting();
+  const settings = useScopedSettings();
+  const updateSettings = useUpdateScopedSettings();
+  const gt = useGT();
+  return (
+    <SettingsRow
+      serverScoped
+      {...searchableSetting("simlock-hosts")}
+      settingKeys={["simlockDeviceHostsEnabled"]}
+      description={
+        <T>
+          Let the Device panel lease simulators and emulators from your own{" "}
+          <InlineButton
+            render={
+              <a href="https://incubator.callstack.com/simlock/" target="_blank" rel="noreferrer" />
+            }
+          >
+            Simlock
+          </InlineButton>{" "}
+          pool, added in{" "}
+          <InlineButton render={<Link to="/settings/devices" />}>Devices</InlineButton>. An alpha
+          that may change or break. Dacre never installs Simlock.
+        </T>
+      }
+      control={
+        <ScopedSwitch
+          settingKeys={["simlockDeviceHostsEnabled"]}
+          checked={settings.simlockDeviceHostsEnabled}
+          onCheckedChange={(checked) =>
+            updateSettings({ simlockDeviceHostsEnabled: Boolean(checked) })
+          }
+          aria-label={gt("Simlock device hosts")}
+        />
+      }
+    />
+  );
+}
+
+/** Shows only when every machine in scope is a Mac, since only macOS servers honor it. */
+function FastWorktreeCheckoutRow() {
+  const searchableSetting = useSearchableSetting();
+  const { scope, connectedEnvironments } = useSettingsScope();
+  const settings = useScopedSettings();
+  const updateSettings = useUpdateScopedSettings();
+  const gt = useGT();
+  if (
+    scope.kind === "project" ||
+    scope.kind === "checkout" ||
+    connectedEnvironments.length === 0 ||
+    connectedEnvironments.some(
+      (environment) =>
+        environment.serverConfig?.environment.capabilities.fastWorktreeCheckout !== true,
+    )
+  )
+    return null;
+  return (
+    <SettingsRow
+      serverScoped
+      {...searchableSetting("worktree-fast-checkout")}
+      settingKeys={["fastWorktreeCheckout"]}
+      description={gt(
+        "On a Mac, clone new worktrees from a checkout cached in the Dacre home folder instead of writing every file. Uses Git’s normal checkout when it can’t. Turning it off deletes the cache.",
+      )}
+      control={
+        <ScopedSwitch
+          settingKeys={["fastWorktreeCheckout"]}
+          checked={settings.fastWorktreeCheckout}
+          onCheckedChange={(checked) => updateSettings({ fastWorktreeCheckout: Boolean(checked) })}
+          aria-label={gt("Fast worktree checkout")}
+        />
+      }
+    />
+  );
+}
+
+/** Shows only when every machine in scope honors it; older servers drop the setting. */
+const AGENT_FEEDBACK_MODES = AgentFeedbackMode.literals;
+const AGENT_FEEDBACK_MODE_LABELS: Record<AgentFeedbackMode, string> = {
+  off: msg("Off"),
+  "on-request": msg("When I ask"),
+  auto: msg("Automatic"),
+};
+const AGENT_FEEDBACK_MODE_DESCRIPTIONS: Record<AgentFeedbackMode, string> = {
+  off: msg("Agents send no feedback to the Dacre team."),
+  "on-request": msg(
+    "When you ask, agents show you a short report about Dacre and send it to the Dacre team if you approve.",
+  ),
+  auto: msg(
+    "Agents also report Dacre problems they hit on their own, such as a Dacre tool that failed.",
+  ),
+};
+
+function AgentFeedbackRow() {
+  const searchableSetting = useSearchableSetting();
+  const { scope, connectedEnvironments } = useSettingsScope();
+  const settings = useScopedSettings();
+  const updateSettings = useUpdateScopedSettings();
+  const gt = useGT();
+  const m = useMessages();
+  const mixed = useScopedSettingsMixed(["agentFeedback"]);
+  if (
+    scope.kind === "project" ||
+    scope.kind === "checkout" ||
+    connectedEnvironments.length === 0 ||
+    connectedEnvironments.some(
+      (environment) => environment.serverConfig?.environment.capabilities.agentFeedback !== true,
+    )
+  )
+    return null;
+  return (
+    <SettingsRow
+      serverScoped
+      {...searchableSetting("agent-feedback")}
+      settingKeys={["agentFeedback"]}
+      description={
+        mixed
+          ? gt("The selected machines use different agent feedback modes.")
+          : m(AGENT_FEEDBACK_MODE_DESCRIPTIONS[settings.agentFeedback.mode])
+      }
+      control={
+        <Select
+          value={mixed ? null : settings.agentFeedback.mode}
+          onValueChange={(mode) => {
+            if (mode !== null) updateSettings({ agentFeedback: { mode } });
+          }}
+        >
+          <SelectTrigger size="sm" className="w-full sm:w-40" aria-label={gt("Agent feedback")}>
+            <SelectValue>
+              {(mode: AgentFeedbackMode | null) =>
+                mode === null ? gt("Mixed") : m(AGENT_FEEDBACK_MODE_LABELS[mode])
+              }
+            </SelectValue>
+          </SelectTrigger>
+          <SelectPopup align="end" alignItemWithTrigger={false}>
+            {AGENT_FEEDBACK_MODES.map((mode) => (
+              <SelectItem key={mode} value={mode}>
+                {m(AGENT_FEEDBACK_MODE_LABELS[mode])}
+              </SelectItem>
+            ))}
+          </SelectPopup>
+        </Select>
+      }
+    />
+  );
+}

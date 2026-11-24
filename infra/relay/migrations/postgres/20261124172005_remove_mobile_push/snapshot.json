@@ -1,0 +1,311 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "2d259eff-8510-4313-9c22-a94356fb6a76",
+  "prevIds": ["4a3b409a-6315-41e4-bd97-a2659709bf35"],
+  "footprints": [
+    {
+      "statementType": "drop_table",
+      "statementTarget": ["table", "public", "relay_agent_activity_rows"],
+      "writes": [
+        "s|tbl|public.relay_agent_activity_rows",
+        "n|tbl|public.relay_agent_activity_rows",
+        "e|tbl|public.relay_agent_activity_rows",
+        "n|rel|public.relay_agent_activity_rows",
+        "n|type|public.relay_agent_activity_rows"
+      ],
+      "reads": ["n|sch|public"]
+    },
+    {
+      "statementType": "drop_table",
+      "statementTarget": ["table", "public", "relay_delivery_attempts"],
+      "writes": [
+        "s|tbl|public.relay_delivery_attempts",
+        "n|tbl|public.relay_delivery_attempts",
+        "e|tbl|public.relay_delivery_attempts",
+        "n|rel|public.relay_delivery_attempts",
+        "n|type|public.relay_delivery_attempts"
+      ],
+      "reads": ["n|sch|public"]
+    },
+    {
+      "statementType": "drop_table",
+      "statementTarget": ["table", "public", "relay_live_activities"],
+      "writes": [
+        "s|tbl|public.relay_live_activities",
+        "n|tbl|public.relay_live_activities",
+        "e|tbl|public.relay_live_activities",
+        "n|rel|public.relay_live_activities",
+        "n|type|public.relay_live_activities"
+      ],
+      "reads": ["n|sch|public"]
+    },
+    {
+      "statementType": "drop_table",
+      "statementTarget": ["table", "public", "relay_mobile_devices"],
+      "writes": [
+        "s|tbl|public.relay_mobile_devices",
+        "n|tbl|public.relay_mobile_devices",
+        "e|tbl|public.relay_mobile_devices",
+        "n|rel|public.relay_mobile_devices",
+        "n|type|public.relay_mobile_devices"
+      ],
+      "reads": ["n|sch|public"]
+    },
+    {
+      "statementType": "drop_column",
+      "statementTarget": ["column", "public", "relay_environment_links", "notifications_enabled"],
+      "writes": [
+        "s|col|public.relay_environment_links.notifications_enabled",
+        "n|col|public.relay_environment_links.notifications_enabled",
+        "e|col|public.relay_environment_links.notifications_enabled"
+      ],
+      "reads": ["n|tbl|public.relay_environment_links", "n|sch|public"]
+    },
+    {
+      "statementType": "drop_column",
+      "statementTarget": ["column", "public", "relay_environment_links", "live_activities_enabled"],
+      "writes": [
+        "s|col|public.relay_environment_links.live_activities_enabled",
+        "n|col|public.relay_environment_links.live_activities_enabled",
+        "e|col|public.relay_environment_links.live_activities_enabled"
+      ],
+      "reads": ["n|tbl|public.relay_environment_links", "n|sch|public"]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "drop",
+      "key": "tables\u0000[\"public\",\"relay_agent_activity_rows\"]"
+    },
+    {
+      "op": "drop",
+      "key": "tables\u0000[\"public\",\"relay_delivery_attempts\"]"
+    },
+    {
+      "op": "drop",
+      "key": "tables\u0000[\"public\",\"relay_live_activities\"]"
+    },
+    {
+      "op": "drop",
+      "key": "tables\u0000[\"public\",\"relay_mobile_devices\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"relay_agent_activity_rows\",\"environment_id\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"relay_agent_activity_rows\",\"environment_public_key\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"relay_agent_activity_rows\",\"thread_id\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"relay_agent_activity_rows\",\"state_json\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"relay_agent_activity_rows\",\"updated_at\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"relay_agent_activity_rows\",\"created_at\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"relay_delivery_attempts\",\"id\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"relay_delivery_attempts\",\"created_at\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"relay_delivery_attempts\",\"user_id\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"relay_delivery_attempts\",\"environment_id\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"relay_delivery_attempts\",\"thread_id\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"relay_delivery_attempts\",\"device_id\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"relay_delivery_attempts\",\"kind\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"relay_delivery_attempts\",\"source_job_id\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"relay_delivery_attempts\",\"token_suffix\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"relay_delivery_attempts\",\"apns_status\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"relay_delivery_attempts\",\"apns_reason\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"relay_delivery_attempts\",\"apns_id\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"relay_delivery_attempts\",\"transport_error\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"relay_environment_links\",\"notifications_enabled\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"relay_environment_links\",\"live_activities_enabled\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"relay_live_activities\",\"user_id\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"relay_live_activities\",\"device_id\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"relay_live_activities\",\"activity_push_token\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"relay_live_activities\",\"remote_start_queued_at\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"relay_live_activities\",\"remote_started_at\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"relay_live_activities\",\"ended_at\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"relay_live_activities\",\"last_aggregate_json\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"relay_live_activities\",\"last_live_activity_delivery_at\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"relay_live_activities\",\"created_at\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"relay_live_activities\",\"updated_at\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"relay_mobile_devices\",\"user_id\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"relay_mobile_devices\",\"device_id\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"relay_mobile_devices\",\"platform\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"relay_mobile_devices\",\"ios_major_version\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"relay_mobile_devices\",\"app_version\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"relay_mobile_devices\",\"push_token\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"relay_mobile_devices\",\"push_to_start_token\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"relay_mobile_devices\",\"preferences_json\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"relay_mobile_devices\",\"created_at\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"relay_mobile_devices\",\"updated_at\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"relay_mobile_devices\",\"label\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"relay_mobile_devices\",\"bundle_id\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"relay_mobile_devices\",\"aps_environment\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"relay_mobile_devices\",\"android_api_level\"]"
+    },
+    {
+      "op": "drop",
+      "key": "indexes\u0000[\"public\",\"idx_relay_delivery_attempts_source_job\"]"
+    },
+    {
+      "op": "drop",
+      "key": "indexes\u0000[\"public\",\"idx_relay_live_activities_activity_push_token\"]"
+    },
+    {
+      "op": "drop",
+      "key": "indexes\u0000[\"public\",\"idx_relay_mobile_devices_push_token\"]"
+    },
+    {
+      "op": "drop",
+      "key": "indexes\u0000[\"public\",\"idx_relay_mobile_devices_push_to_start_token\"]"
+    },
+    {
+      "op": "drop",
+      "key": "indexes\u0000[\"public\",\"idx_relay_delivery_attempts_created\"]"
+    },
+    {
+      "op": "drop",
+      "key": "pks\u0000[\"public\",\"relay_agent_activity_rows\",\"relay_agent_activity_rows_pkey\"]"
+    },
+    {
+      "op": "drop",
+      "key": "pks\u0000[\"public\",\"relay_live_activities\",\"relay_live_activities_pkey\"]"
+    },
+    {
+      "op": "drop",
+      "key": "pks\u0000[\"public\",\"relay_mobile_devices\",\"relay_mobile_devices_pkey\"]"
+    },
+    {
+      "op": "drop",
+      "key": "pks\u0000[\"public\",\"relay_delivery_attempts\",\"relay_delivery_attempts_pkey\"]"
+    }
+  ]
+}

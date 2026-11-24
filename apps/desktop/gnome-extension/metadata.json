@@ -1,0 +1,8 @@
+{
+  "uuid": "snap-shot@dacre.invalid",
+  "name": "Dacre SnapShots",
+  "description": "Allows Dacre to capture the focused window, identify it for optional accessibility text, and animate it into Dacre. Disable this extension to revoke access.",
+  "shell-version": ["45", "46", "47", "48", "49", "50", "51"],
+  "version": 3,
+  "url": "https://github.com/DacreDev/Dacre"
+}

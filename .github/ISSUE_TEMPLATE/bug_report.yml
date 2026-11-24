@@ -1,0 +1,47 @@
+name: Bug report
+description: Something in Dacre does not work as expected.
+labels: [bug]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open a thread in a project
+        2. ...
+  - type: input
+    id: version
+    attributes:
+      label: Dacre version
+      description: Settings > About shows it.
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - Windows
+        - macOS
+        - Linux
+        - Web
+    validations:
+      required: true
+  - type: input
+    id: agent
+    attributes:
+      label: Agent and model
+      placeholder: Claude Code, Opus
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Settings > Diagnostics > Open logs folder. Remove anything private before you paste.
+      render: text

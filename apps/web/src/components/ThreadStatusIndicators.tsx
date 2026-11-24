@@ -1,0 +1,1187 @@
+import { changeRequestTermKind, type ChangeRequestTermKind } from "./pullRequest/changeRequestTerm";
+import {
+  scopeProjectRef,
+  scopedThreadKey,
+  scopeThreadRef,
+} from "@dacre/client-runtime/environment";
+import { useSupportsMultiplePullRequests } from "~/hooks/useSupportsMultiplePullRequests";
+import { useStableCallback } from "~/hooks/useStableCallback";
+
+import { pullRequestDetailToVcsStatus } from "@dacre/client-runtime/state/pull-requests";
+import type { EnvironmentThreadShell } from "@dacre/client-runtime/state/shell";
+import {
+  resolveEnvironmentMachineKind,
+  type EnvironmentId,
+  type ScopedThreadRef,
+  type ThreadLinkedPullRequest,
+  type ThreadPullRequestLink,
+  type VcsStatusResult,
+} from "@dacre/contracts";
+import { msg, T, useGT, useMessages } from "gt-react";
+import { TerminalIcon } from "lucide-react";
+import { m, type MessageResolver } from "../i18n/messages";
+import { useEnvironment, usePrimaryEnvironmentId } from "../state/environments";
+import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";
+import { useProject } from "../state/entities";
+import {
+  pullRequestListLines,
+  type PullRequestListLine,
+  resolveThreadCurrentPullRequestLink,
+  resolveThreadPullRequestBadge,
+  resolveThreadPullRequestChains,
+  type ThreadPullRequestBadge,
+  visibleThreadPullRequests,
+} from "@dacre/client-runtime/thread-pull-requests";
+import { useRender } from "@base-ui/react/use-render";
+import { type AnimationEvent, type MouseEvent, type PointerEvent, type ReactElement } from "react";
+import { cn } from "../lib/utils";
+import { revealThreadTerminal } from "../lib/revealThreadTerminal";
+
+import { useEnvironmentQuery } from "../state/query";
+import { linkedPullRequestDetailAtom, useSharedPullRequestSummary } from "../state/pullRequests";
+import { useThreadRunningTerminalIds } from "../state/terminalSessions";
+import { vcsEnvironment } from "../state/vcs";
+import { useUiStateStore } from "../uiStateStore";
+import { sourceControlClients } from "@dacre/client-runtime/source-control-clients";
+import {
+  pullRequestMatchesSearchQuery,
+  resolveThreadLastVisitedAt,
+  resolveThreadStatusPill,
+  type ThreadStatusPill,
+  useRetainedValue,
+  useSidebarRowSubscriptionLease,
+} from "./Sidebar.logic";
+
+import type { SidebarThreadSummary } from "../types";
+import { Button } from "./ui/button";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
+import {
+  PULL_REQUEST_STATE_PRESENTATION,
+  PullRequestGlyph,
+  type PullRequestGlyphIcon,
+} from "./pullRequest/pullRequestIcons";
+import { resolvePullRequestState } from "./pullRequest/pullRequestPresentation";
+
+export interface PrStatusIndicator {
+  label: string;
+  colorClass: string;
+  Icon: PullRequestGlyphIcon;
+  tooltip: string;
+  tooltipLead: string;
+  tooltipTitle: string;
+  url: string;
+}
+
+export interface TerminalStatusIndicator {
+  label: string;
+  colorClass: string;
+  pulse: boolean;
+}
+
+export type ThreadPr = VcsStatusResult["pr"];
+
+export interface LinkedThreadPullRequestStatus {
+  readonly pr: NonNullable<ThreadPr>;
+  readonly sourceControlProvider: NonNullable<VcsStatusResult["sourceControlProvider"]>;
+}
+
+export function useLinkedThreadPullRequest(
+  environmentId: EnvironmentId | null,
+  linkedPullRequest: ThreadLinkedPullRequest | null | undefined,
+  enabled = true,
+  pullRequests?: ReadonlyArray<ThreadPullRequestLink>,
+  branchPullRequest?: ThreadLinkedPullRequest | null,
+): LinkedThreadPullRequestStatus | null {
+  const supportsLinks = useSupportsMultiplePullRequests(environmentId);
+  const current = supportsLinks ? resolveThreadCurrentPullRequestLink(pullRequests ?? []) : null;
+  const currentStatus = current === null ? null : linkedPullRequestSnapshotStatus(current);
+  const fallback =
+    current === null ? ((!supportsLinks ? linkedPullRequest : null) ?? branchPullRequest) : null;
+  // Preserve reference identity so sidebar renders do not touch the summary cache.
+  const reference = fallback == null ? null : linkedPullRequestReference(fallback);
+  // Mounted for its answers, which land in the shared summary read below.
+  useEnvironmentQuery(
+    !enabled || environmentId === null || reference === null
+      ? null
+      : linkedPullRequestDetailAtom({ environmentId, input: reference }),
+  );
+  const detail = useSharedPullRequestSummary(environmentId, reference);
+
+  if (current !== null) return currentStatus;
+  return detail === null
+    ? null
+    : {
+        pr: pullRequestDetailToVcsStatus(detail),
+        sourceControlProvider: {
+          kind: detail.provider,
+          name: sourceControlClients.get(detail.provider).label,
+          baseUrl: "",
+        },
+      };
+}
+
+/** The pull request a thread shows: its current link, else the one found for its branch. */
+export function useThreadDisplayedPullRequest(
+  environmentId: EnvironmentId,
+  thread: Pick<
+    EnvironmentThreadShell,
+    "pullRequests" | "linkedPullRequest" | "branchPullRequest"
+  > | null,
+  branchPr: ThreadPr = null,
+  branchSourceControlProvider?: VcsStatusResult["sourceControlProvider"],
+) {
+  const m = useMessages();
+  const supportsLinks = useSupportsMultiplePullRequests(environmentId);
+  const linkedStatus = useLinkedThreadPullRequest(
+    environmentId,
+    thread?.linkedPullRequest,
+    true,
+    thread?.pullRequests,
+    thread?.branchPullRequest,
+  );
+  const currentLink = supportsLinks
+    ? resolveThreadCurrentPullRequestLink(thread?.pullRequests ?? [])
+    : null;
+  const pr = linkedStatus?.pr ?? (currentLink === null ? branchPr : null);
+  return {
+    currentLink,
+    badge: supportsLinks ? resolveThreadPullRequestBadge(thread?.pullRequests) : null,
+    pr,
+    status: prStatusIndicator(
+      pr,
+      linkedStatus?.sourceControlProvider ?? branchSourceControlProvider,
+      m,
+    ),
+    number: currentLink?.number ?? pr?.number,
+    url: currentLink?.url ?? pr?.url,
+  };
+}
+
+function linkedPullRequestReference(fallback: ThreadLinkedPullRequest) {
+  const host = sourceControlClients.parseChangeRequestUrl(fallback.url)?.link.host;
+  return { ...fallback, ...(host === undefined ? {} : { host }) };
+}
+
+function changeRequestTerminologyForUrl(url: string | undefined) {
+  const host = url === undefined ? null : sourceControlClients.findByChangeRequestUrl(url);
+  return (host ?? sourceControlClients.get(undefined)).changeRequest;
+}
+
+export function linkedPullRequestSnapshotStatus(
+  link: ThreadPullRequestLink,
+): LinkedThreadPullRequestStatus | null {
+  const snapshot = link.snapshot;
+  if (snapshot === null) return null;
+  const kind = (
+    sourceControlClients.findByChangeRequestUrl(link.url) ?? sourceControlClients.get(undefined)
+  ).kind;
+  return {
+    pr: {
+      number: link.number,
+      url: link.url,
+      title: snapshot.title,
+      state: snapshot.state,
+      isDraft: snapshot.isDraft,
+      headRef: snapshot.headBranch,
+      baseRef: snapshot.baseBranch,
+      ...(snapshot.updatedAt === null ? {} : { updatedAt: snapshot.updatedAt }),
+    },
+    sourceControlProvider: { kind, name: kind, baseUrl: "" },
+  };
+}
+
+export {
+  resolveThreadPullRequestBadge,
+  type ThreadPullRequestBadge,
+} from "@dacre/client-runtime/thread-pull-requests";
+
+export interface ThreadPullRequestBadgePresentation {
+  readonly Icon: PullRequestGlyphIcon;
+  readonly toneClassName: string;
+  readonly label: string;
+  readonly text: string | number;
+  /** Links folded into the badge beyond the one it names: stack layers or unrelated links. */
+  readonly more: number;
+}
+
+export type ThreadPullRequestBadgeAppearance = "glyph" | "number";
+
+type PullRequestBadgeState = ThreadPullRequestBadge["state"];
+
+function stackBadgeLabel(
+  state: PullRequestBadgeState,
+  count: number,
+  term: ChangeRequestTermKind,
+  resolve: MessageResolver,
+): string {
+  switch (state) {
+    case "open":
+      return resolve(
+        msg(
+          "{count, plural, one {Stack of {count} {term, select, mr {merge requests} cr {change requests} other {pull requests}}, open} other {Stack of {count} {term, select, mr {merge requests} cr {change requests} other {pull requests}}, open}}",
+          { count, term },
+        ),
+      );
+    case "draft":
+      return resolve(
+        msg(
+          "{count, plural, one {Stack of {count} {term, select, mr {merge requests} cr {change requests} other {pull requests}}, draft} other {Stack of {count} {term, select, mr {merge requests} cr {change requests} other {pull requests}}, draft}}",
+          { count, term },
+        ),
+      );
+    case "closed":
+      return resolve(
+        msg(
+          "{count, plural, one {Stack of {count} {term, select, mr {merge requests} cr {change requests} other {pull requests}}, closed} other {Stack of {count} {term, select, mr {merge requests} cr {change requests} other {pull requests}}, closed}}",
+          { count, term },
+        ),
+      );
+    case "merged":
+      return resolve(
+        msg(
+          "{count, plural, one {Stack of {count} {term, select, mr {merge requests} cr {change requests} other {pull requests}}, merged} other {Stack of {count} {term, select, mr {merge requests} cr {change requests} other {pull requests}}, merged}}",
+          { count, term },
+        ),
+      );
+  }
+}
+
+function moreLinkedBadgeLabel(
+  state: PullRequestBadgeState,
+  tooltip: string,
+  others: number,
+  resolve: MessageResolver,
+): string {
+  switch (state) {
+    case "open":
+      return resolve(
+        msg(
+          "{others, plural, one {{tooltip}, and {others} more linked; overall open} other {{tooltip}, and {others} more linked; overall open}}",
+          { tooltip, others },
+        ),
+      );
+    case "draft":
+      return resolve(
+        msg(
+          "{others, plural, one {{tooltip}, and {others} more linked; overall draft} other {{tooltip}, and {others} more linked; overall draft}}",
+          { tooltip, others },
+        ),
+      );
+    case "closed":
+      return resolve(
+        msg(
+          "{others, plural, one {{tooltip}, and {others} more linked; overall closed} other {{tooltip}, and {others} more linked; overall closed}}",
+          { tooltip, others },
+        ),
+      );
+    case "merged":
+      return resolve(
+        msg(
+          "{others, plural, one {{tooltip}, and {others} more linked; overall merged} other {{tooltip}, and {others} more linked; overall merged}}",
+          { tooltip, others },
+        ),
+      );
+  }
+}
+
+function prStatusLabels(
+  state: PullRequestBadgeState,
+  term: ChangeRequestTermKind,
+  number: number,
+  resolve: MessageResolver,
+): { readonly label: string; readonly tooltipLead: string } {
+  switch (state) {
+    case "open":
+      return {
+        label: resolve(
+          msg("{term, select, mr {MR} cr {change request} other {PR}} open", { term }),
+        ),
+        tooltipLead: resolve(
+          msg("{term, select, mr {MR} cr {change request} other {PR}} #{number} - Open", {
+            term,
+            number,
+          }),
+        ),
+      };
+    case "draft":
+      return {
+        label: resolve(
+          msg("{term, select, mr {MR} cr {change request} other {PR}} draft", { term }),
+        ),
+        tooltipLead: resolve(
+          msg("{term, select, mr {MR} cr {change request} other {PR}} #{number} - Draft", {
+            term,
+            number,
+          }),
+        ),
+      };
+    case "closed":
+      return {
+        label: resolve(
+          msg("{term, select, mr {MR} cr {change request} other {PR}} closed", { term }),
+        ),
+        tooltipLead: resolve(
+          msg("{term, select, mr {MR} cr {change request} other {PR}} #{number} - Closed", {
+            term,
+            number,
+          }),
+        ),
+      };
+    case "merged":
+      return {
+        label: resolve(
+          msg("{term, select, mr {MR} cr {change request} other {PR}} merged", { term }),
+        ),
+        tooltipLead: resolve(
+          msg("{term, select, mr {MR} cr {change request} other {PR}} #{number} - Merged", {
+            term,
+            number,
+          }),
+        ),
+      };
+  }
+}
+
+function resolveThreadPullRequestBadgePresentation(
+  {
+    badge,
+    number,
+    url,
+    status,
+  }: {
+    readonly badge: ThreadPullRequestBadge | null;
+    readonly number?: number | undefined;
+    readonly url?: string | undefined;
+    readonly status: PrStatusIndicator | null;
+  },
+  resolve: MessageResolver = m,
+): ThreadPullRequestBadgePresentation | null {
+  const terminology = changeRequestTerminologyForUrl(url);
+  if (badge?.kind === "stack") {
+    const aggregate = PULL_REQUEST_STATE_PRESENTATION[badge.state];
+    return {
+      Icon: PullRequestGlyph.stack,
+      toneClassName: aggregate.toneClassName,
+      label: stackBadgeLabel(
+        badge.state,
+        badge.layers,
+        changeRequestTermKind(terminology),
+        resolve,
+      ),
+      text: badge.layers,
+      more: badge.layers - 1,
+    };
+  }
+  if (number === undefined || url === undefined) return null;
+
+  const tooltip =
+    status?.tooltip ??
+    resolve(
+      msg("{term, select, mr {MR} cr {change request} other {PR}} #{number}, status pending", {
+        term: changeRequestTermKind(terminology),
+        number,
+      }),
+    );
+  if (badge?.kind === "pull-request" && badge.others > 0) {
+    const aggregate = PULL_REQUEST_STATE_PRESENTATION[badge.state];
+    return {
+      Icon: aggregate.Icon,
+      toneClassName: aggregate.toneClassName,
+      label: moreLinkedBadgeLabel(badge.state, tooltip, badge.others, resolve),
+      text: `+${badge.others + 1}`,
+      more: badge.others,
+    };
+  }
+  return {
+    Icon: status?.Icon ?? PullRequestGlyph.pullRequest,
+    toneClassName: status?.colorClass ?? "text-muted-foreground",
+    label: tooltip,
+    text: number,
+    more: 0,
+  };
+}
+
+export function ThreadPullRequestBadgeControl({
+  render,
+  badge,
+  pullRequests,
+  number,
+  url,
+  status,
+  onOpenList,
+  onOpenPullRequest,
+  onPress,
+  onPressPullRequest,
+  appearance = "glyph",
+}: {
+  render: ReactElement<{ render?: useRender.RenderProp }>;
+  badge: ThreadPullRequestBadge | null;
+  pullRequests: ReadonlyArray<ThreadPullRequestLink>;
+  number?: number | undefined;
+  url?: string | undefined;
+  status: PrStatusIndicator | null;
+  onOpenList: () => void;
+  onOpenPullRequest: (event: MouseEvent<HTMLElement>, url?: string) => void;
+  onPress: (event: PointerEvent<HTMLElement>, opensList: boolean) => void;
+  onPressPullRequest: (event: PointerEvent<HTMLElement>, url: string) => void;
+  appearance?: ThreadPullRequestBadgeAppearance;
+}) {
+  const m = useMessages();
+  const presentation = resolveThreadPullRequestBadgePresentation({ badge, number, url, status }, m);
+  if (presentation === null) return null;
+  return (
+    <PullRequestBadge
+      render={render}
+      appearance={appearance}
+      presentation={presentation}
+      opensList={badge !== null && (badge.kind === "stack" || badge.others > 0)}
+      url={url}
+      number={number}
+      status={status}
+      pullRequests={pullRequests}
+      onOpenList={onOpenList}
+      onOpenPullRequest={onOpenPullRequest}
+      onPress={onPress}
+      onPressPullRequest={onPressPullRequest}
+    />
+  );
+}
+
+function PullRequestBadge({
+  render,
+  appearance,
+  presentation,
+  opensList,
+  url,
+  number,
+  status,
+  pullRequests,
+  onOpenList,
+  onOpenPullRequest,
+  onPress,
+  onPressPullRequest,
+}: {
+  render: ReactElement<{ render?: useRender.RenderProp }>;
+  appearance: ThreadPullRequestBadgeAppearance;
+  presentation: NonNullable<ReturnType<typeof resolveThreadPullRequestBadgePresentation>>;
+  opensList: boolean;
+  url: string | undefined;
+  number: number | undefined;
+  status: PrStatusIndicator | null;
+  pullRequests: ReadonlyArray<ThreadPullRequestLink>;
+  onOpenList: () => void;
+  onOpenPullRequest: (event: MouseEvent<HTMLElement>, url?: string) => void;
+  onPress: (event: PointerEvent<HTMLElement>, opensList: boolean) => void;
+  onPressPullRequest: (event: PointerEvent<HTMLElement>, url: string) => void;
+}) {
+  const onClick = opensList
+    ? (event: MouseEvent<HTMLElement>) => {
+        event.preventDefault();
+        event.stopPropagation();
+        onOpenList();
+      }
+    : onOpenPullRequest;
+  const element = opensList ? (
+    <button type="button" />
+  ) : (
+    <a href={url} target="_blank" rel="noopener noreferrer" draggable={false} />
+  );
+  const control = useRender({
+    render,
+    props: {
+      render: element,
+      "aria-label": presentation.label,
+      onPointerDown: (event: PointerEvent<HTMLElement>) => {
+        event.stopPropagation();
+        onPress(event, opensList);
+      },
+      onClick,
+    },
+  });
+  return (
+    <Tooltip key={opensList ? "list" : "link"}>
+      <TooltipTrigger render={control}>
+        <span
+          className={cn(
+            "contents tabular-nums",
+            appearance === "number" ? "text-meta" : "font-normal text-xs",
+            presentation.toneClassName,
+          )}
+        >
+          <presentation.Icon aria-hidden className="size-3 shrink-0" />
+          <span className={appearance === "number" ? "text-secondary-label" : undefined}>
+            {presentation.text}
+          </span>
+        </span>
+      </TooltipTrigger>
+      <TooltipPopup
+        side="top"
+        sideOffset={0}
+        variant="popover"
+        className="pointer-events-auto w-80 max-w-[calc(100vw-2rem)] text-left whitespace-normal"
+      >
+        <div className="-mx-1 max-h-[calc(var(--available-height)-0.5rem-2px)] overflow-y-auto overscroll-contain">
+          {visibleThreadPullRequests(pullRequests).length > 0 ? (
+            <ThreadPullRequestsMiniList
+              pullRequests={pullRequests}
+              onOpenPullRequest={onOpenPullRequest}
+              onPressPullRequest={onPressPullRequest}
+            />
+          ) : number !== undefined && url !== undefined ? (
+            <ul className="flex flex-col gap-1">
+              <ThreadPullRequestMiniListItem
+                number={number}
+                url={url}
+                title={status?.tooltipTitle ?? presentation.label}
+                presentation={presentation}
+                onOpenPullRequest={onOpenPullRequest}
+                onPressPullRequest={onPressPullRequest}
+              />
+            </ul>
+          ) : null}
+        </div>
+      </TooltipPopup>
+    </Tooltip>
+  );
+}
+
+const THREAD_PULL_REQUEST_PREVIEW_LIMIT = 5;
+
+export function ThreadPullRequestsMiniList({
+  pullRequests,
+  onOpenPullRequest,
+  onPressPullRequest,
+}: {
+  pullRequests: ReadonlyArray<ThreadPullRequestLink>;
+  onOpenPullRequest?: (event: MouseEvent<HTMLAnchorElement>, url: string) => void;
+  onPressPullRequest?: (event: PointerEvent<HTMLElement>, url: string) => void;
+}) {
+  const gt = useGT();
+  const { shown, hiddenCount } = previewChains(
+    pullRequestListLines(resolveThreadPullRequestChains(pullRequests)),
+  );
+  if (shown.length === 0) return null;
+  const firstUrl = shown[0]!.lines[0]!.link.url;
+  const term = changeRequestTermKind(
+    sourceControlClients.findByChangeRequestUrl(firstUrl)?.changeRequest ??
+      sourceControlClients.get(undefined).changeRequest,
+  );
+  // Interactive rows carry their own hover padding; the header and the note line up with them.
+  const inset = onOpenPullRequest ? "px-1" : undefined;
+  const row = (line: PullRequestListLine) => {
+    const snapshot = line.link.snapshot;
+    return (
+      <ThreadPullRequestMiniListItem
+        key={`${line.link.host}/${line.link.repository}#${line.link.number}`}
+        number={line.link.number}
+        url={line.link.url}
+        title={snapshot?.title ?? line.link.repository}
+        presentation={
+          snapshot === null
+            ? null
+            : resolvePullRequestState({ state: snapshot.state, isDraft: snapshot.isDraft })
+        }
+        onOpenPullRequest={onOpenPullRequest}
+        onPressPullRequest={onPressPullRequest}
+      />
+    );
+  };
+  return (
+    <ul className={cn("flex flex-col", onOpenPullRequest ? "gap-1" : "gap-1.5")}>
+      {shown.map(({ group, lines }) =>
+        group.length < 2 ? (
+          lines.map(row)
+        ) : (
+          // The pull requests page's opened-stack frame; padding cancels the margin, keeping one edge.
+          <li
+            key={group[0]!.chainKey}
+            className={cn(
+              "rounded-md bg-foreground/[0.015] outline outline-border/60",
+              onOpenPullRequest ? "py-0.5" : "-mx-1.5 px-1.5 py-1",
+            )}
+          >
+            <div className={cn("flex min-w-0 items-center gap-2 text-muted-foreground", inset)}>
+              <PullRequestGlyph.stack aria-hidden className="size-3 shrink-0" />
+              <span className="shrink-0 text-foreground">
+                <T context="noun, a stack of pull requests">Stack</T>
+              </span>
+              <span className="min-w-0 truncate">
+                {gt(
+                  "{count, plural, one {{count} {term, select, mr {merge request} cr {change request} other {pull request}}} other {{count} {term, select, mr {merge requests} cr {change requests} other {pull requests}}}}",
+                  { count: group.length, term },
+                )}
+              </span>
+            </div>
+            <ul
+              className={cn("flex flex-col", onOpenPullRequest ? "mt-1 gap-1" : "mt-1.5 gap-1.5")}
+            >
+              {lines.map(row)}
+            </ul>
+          </li>
+        ),
+      )}
+      {hiddenCount > 0 ? (
+        <li className={cn("text-muted-foreground", inset)}>
+          {gt(
+            "{count, plural, one {{count} more {term, select, mr {merge request} cr {change request} other {pull request}}} other {{count} more {term, select, mr {merge requests} cr {change requests} other {pull requests}}}}",
+            { count: hiddenCount, term },
+          )}
+        </li>
+      ) : null}
+    </ul>
+  );
+}
+
+/** The first lines of the chains, any chain with an open layer first, each kept in order. */
+function previewChains(lines: ReadonlyArray<PullRequestListLine>) {
+  const groups: Array<Array<PullRequestListLine>> = [];
+  for (const line of lines) {
+    const last = groups.at(-1);
+    if (last !== undefined && last[0]!.chainKey === line.chainKey) last.push(line);
+    else groups.push([line]);
+  }
+  const isOpen = (line: PullRequestListLine) =>
+    line.link.snapshot === null || line.link.snapshot.state === "open";
+  const shown: Array<{ group: Array<PullRequestListLine>; lines: Array<PullRequestListLine> }> = [];
+  let budget = THREAD_PULL_REQUEST_PREVIEW_LIMIT;
+  for (const group of groups.toSorted(
+    (left, right) => Number(right.some(isOpen)) - Number(left.some(isOpen)),
+  )) {
+    if (budget <= 0) break;
+    shown.push({ group, lines: group.slice(0, budget) });
+    budget -= group.length;
+  }
+  return { shown, hiddenCount: lines.length - THREAD_PULL_REQUEST_PREVIEW_LIMIT };
+}
+
+/** One line of a thread's hover list: a pull request, or an issue with its own key. */
+export function ThreadPullRequestMiniListItem({
+  number,
+  keyLabel,
+  ariaLabel,
+  url,
+  title,
+  presentation,
+  onOpenPullRequest,
+  onPressPullRequest,
+}: {
+  number?: number;
+  /** In place of `#number`, for an issue whose tracker names it its own way. */
+  keyLabel?: string;
+  ariaLabel?: string;
+  url: string;
+  title: string;
+  presentation: Pick<ThreadPullRequestBadgePresentation, "Icon" | "toneClassName"> | null;
+  onOpenPullRequest?: ((event: MouseEvent<HTMLAnchorElement>, url: string) => void) | undefined;
+  onPressPullRequest?: ((event: PointerEvent<HTMLElement>, url: string) => void) | undefined;
+}) {
+  const Icon = presentation?.Icon ?? PullRequestGlyph.pullRequest;
+  const content = (
+    <>
+      <Icon
+        aria-hidden
+        className={cn("size-3 shrink-0", presentation?.toneClassName ?? "stroke-muted-foreground")}
+      />
+      <span className="shrink-0 font-mono tabular-nums text-foreground">
+        {keyLabel ?? `#${number}`}
+      </span>
+      <span className="min-w-0 truncate text-muted-foreground">{title}</span>
+    </>
+  );
+  return (
+    <li>
+      {onOpenPullRequest ? (
+        <a
+          href={url}
+          target="_blank"
+          rel="noopener noreferrer"
+          draggable={onPressPullRequest ? false : undefined}
+          aria-label={ariaLabel}
+          className="flex min-w-0 items-center gap-2 rounded-sm px-1 py-1 hover:surface-ghost-hover focus-visible:surface-ghost-hover focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
+          onPointerDown={(event) => {
+            event.stopPropagation();
+            onPressPullRequest?.(event, url);
+          }}
+          onClick={(event) => onOpenPullRequest(event, url)}
+        >
+          {content}
+        </a>
+      ) : (
+        <div className="flex min-w-0 items-center gap-2">{content}</div>
+      )}
+    </li>
+  );
+}
+
+export function prStatusIndicator(
+  pr: ThreadPr,
+  provider: VcsStatusResult["sourceControlProvider"] | null | undefined,
+  resolve: MessageResolver = m,
+): PrStatusIndicator | null {
+  if (!pr) return null;
+  const term = changeRequestTermKind(sourceControlClients.get(provider?.kind).changeRequest);
+  const state = resolvePullRequestState({ state: pr.state, isDraft: pr.isDraft === true }, resolve);
+  const { label, tooltipLead } = prStatusLabels(
+    pr.state === "open" && pr.isDraft === true ? "draft" : pr.state,
+    term,
+    pr.number,
+    resolve,
+  );
+  return {
+    label,
+    colorClass: state.toneClassName,
+    Icon: state.Icon,
+    tooltip: resolve(msg("{tooltipLead}: {title}", { tooltipLead, title: pr.title })),
+    tooltipLead,
+    tooltipTitle: pr.title,
+    url: pr.url,
+  };
+}
+
+export function ChangeRequestStatusIcon({
+  state,
+  isDraft = false,
+  className,
+}: Pick<NonNullable<ThreadPr>, "state"> & {
+  readonly isDraft?: boolean | undefined;
+  readonly className?: string | undefined;
+}) {
+  const presentation = resolvePullRequestState({ state, isDraft });
+  return <presentation.Icon className={className} />;
+}
+
+function PrStatusTooltipContent({ status }: { status: PrStatusIndicator }) {
+  return (
+    <span className="flex max-w-[min(34rem,calc(100vw-2rem))] items-stretch overflow-hidden whitespace-nowrap">
+      <span className="shrink-0 pr-2 font-medium">{status.tooltipLead}</span>
+      <span className="min-h-4 shrink-0 border-border/70 border-l" aria-hidden="true" />
+      <span className="min-w-0 truncate pl-2">{status.tooltipTitle}</span>
+    </span>
+  );
+}
+
+export function resolveDisplayedThreadPr(input: {
+  threadBranch: string | null;
+  gitStatus: VcsStatusResult | null;
+  linkedPullRequest?: ThreadLinkedPullRequest | null | undefined;
+  linkedPullRequestStatus?: LinkedThreadPullRequestStatus | null | undefined;
+}): ThreadPr | null {
+  const { threadBranch, gitStatus, linkedPullRequest, linkedPullRequestStatus } = input;
+  if (linkedPullRequest != null) {
+    return linkedPullRequestStatus?.pr ?? null;
+  }
+  if (
+    threadBranch !== null &&
+    gitStatus !== null &&
+    gitStatus.refName === threadBranch &&
+    gitStatus.pr?.state === "open"
+  ) {
+    return gitStatus.pr;
+  }
+
+  return null;
+}
+
+export function resolveDisplayedThreadPrProvider(input: {
+  threadBranch: string | null;
+  gitStatus: VcsStatusResult | null;
+  linkedPullRequest?: ThreadLinkedPullRequest | null | undefined;
+  linkedPullRequestStatus?: LinkedThreadPullRequestStatus | null | undefined;
+}): VcsStatusResult["sourceControlProvider"] | undefined {
+  const { gitStatus, linkedPullRequest, linkedPullRequestStatus } = input;
+  if (linkedPullRequest != null) {
+    return linkedPullRequestStatus?.sourceControlProvider;
+  }
+  if (resolveDisplayedThreadPr(input) !== null) {
+    return gitStatus?.sourceControlProvider;
+  }
+
+  return undefined;
+}
+
+export function terminalStatusFromRunningIds(
+  runningTerminalIds: ReadonlyArray<string>,
+  resolve: MessageResolver = m,
+): TerminalStatusIndicator | null {
+  if (runningTerminalIds.length === 0) {
+    return null;
+  }
+  return {
+    label: resolve(msg("Terminal process running")),
+    colorClass: "text-success-foreground",
+    pulse: true,
+  };
+}
+
+function synchronizeTerminalPulse(event: AnimationEvent<SVGSVGElement>) {
+  if (event.animationName !== "status-pulse") return;
+
+  for (const animation of event.currentTarget.getAnimations()) {
+    if ("animationName" in animation && animation.animationName === "status-pulse") {
+      animation.startTime = 0;
+    }
+  }
+}
+
+export function ThreadTerminalStatusButton({
+  threadRef,
+  terminalIds,
+  onThreadActivate,
+}: {
+  threadRef: ScopedThreadRef;
+  terminalIds: readonly string[];
+  onThreadActivate: (threadRef: ScopedThreadRef) => void;
+}) {
+  const gt = useGT();
+  const messages = useMessages();
+  const terminalId = terminalIds[0];
+  if (terminalId === undefined) return null;
+  const status = terminalStatusFromRunningIds(terminalIds, messages);
+  const label = gt(
+    "{count, plural, one {{count} terminal process running. Open terminal} other {{count} terminal processes running. Open terminal}}",
+    { count: terminalIds.length },
+  );
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Button
+            variant="ghost"
+            size="icon-micro"
+            aria-label={label}
+            data-testid={`sidebar-terminal-status-${threadRef.threadId}`}
+            onPointerDown={(event) => event.stopPropagation()}
+            onKeyDown={(event) => event.stopPropagation()}
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              revealThreadTerminal(threadRef, terminalId);
+              onThreadActivate(threadRef);
+            }}
+          />
+        }
+      >
+        <TerminalIcon
+          className={cn("size-3.5 motion-safe:animate-status-pulse", status?.colorClass)}
+          onAnimationStart={synchronizeTerminalPulse}
+        />
+      </TooltipTrigger>
+      <TooltipPopup side="top">{label}</TooltipPopup>
+    </Tooltip>
+  );
+}
+
+function ThreadStatusLabel({
+  status,
+  compact = false,
+}: {
+  status: ThreadStatusPill;
+  compact?: boolean;
+}) {
+  const m = useMessages();
+  const label = m(status.label);
+  if (compact) {
+    return (
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <span
+              role="img"
+              aria-label={label}
+              className={`inline-flex size-3.5 shrink-0 items-center justify-center ${status.colorClass}`}
+            />
+          }
+        >
+          <span
+            className={`size-[9px] rounded-full transition-colors duration-150 ${status.dotClass} ${
+              status.pulse ? "motion-safe:animate-status-pulse" : ""
+            }`}
+          />
+        </TooltipTrigger>
+        <TooltipPopup side="top">{label}</TooltipPopup>
+      </Tooltip>
+    );
+  }
+
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <span
+            role="img"
+            aria-label={label}
+            className={`inline-flex items-center gap-1 text-micro ${status.colorClass}`}
+          />
+        }
+      >
+        <span
+          className={`h-1.5 w-1.5 rounded-full transition-colors duration-150 ${status.dotClass} ${
+            status.pulse ? "motion-safe:animate-status-pulse" : ""
+          }`}
+        />
+        <span className="hidden md:inline">{label}</span>
+      </TooltipTrigger>
+      <TooltipPopup side="top">{label}</TooltipPopup>
+    </Tooltip>
+  );
+}
+
+export function ThreadRowLeadingStatus({ thread }: { thread: SidebarThreadSummary }) {
+  const gt = useGT();
+  const m = useMessages();
+  const { leaseLiveStatus, rowRef } = useSidebarRowSubscriptionLease(false);
+  // A new ref callback would detach and reattach the row, and each reattach sets lease state.
+  const statusRef = useStableCallback((node: HTMLSpanElement | null) =>
+    rowRef(node?.parentElement ?? null),
+  );
+  const threadRef = scopeThreadRef(thread.environmentId, thread.id);
+  const localLastVisitedAt = useUiStateStore(
+    (state) => state.threadLastVisitedAtById[scopedThreadKey(threadRef)],
+  );
+  const lastVisitedAt = resolveThreadLastVisitedAt(thread.lastVisitedAt, localLastVisitedAt);
+  const threadProject = useProject(scopeProjectRef(thread.environmentId, thread.projectId));
+  const threadProjectCwd = threadProject?.workspaceRoot ?? null;
+  const gitCwd = thread.worktreePath ?? threadProjectCwd;
+  const linkedPullRequest = useLinkedThreadPullRequest(
+    thread.environmentId,
+    thread.linkedPullRequest,
+    leaseLiveStatus,
+    thread.pullRequests,
+    thread.branchPullRequest,
+  );
+  const gitStatus = useEnvironmentQuery(
+    leaseLiveStatus &&
+      thread.linkedPullRequest == null &&
+      (thread.branch != null || thread.worktreePath !== null) &&
+      gitCwd !== null
+      ? vcsEnvironment.status({
+          environmentId: thread.environmentId,
+          input: { cwd: gitCwd, includeRemote: false },
+        })
+      : null,
+  );
+  const visibleGitStatus = useRetainedValue(
+    JSON.stringify([thread.environmentId, gitCwd]),
+    gitStatus.data,
+  );
+  const displayedPrInput = {
+    threadBranch: thread.branch,
+    gitStatus: visibleGitStatus,
+    linkedPullRequest: thread.linkedPullRequest,
+    linkedPullRequestStatus: linkedPullRequest,
+  };
+  const pr = linkedPullRequest?.pr ?? resolveDisplayedThreadPr(displayedPrInput);
+  const prStatus = prStatusIndicator(
+    pr,
+    linkedPullRequest?.sourceControlProvider ?? resolveDisplayedThreadPrProvider(displayedPrInput),
+    m,
+  );
+  const threadStatus = resolveThreadStatusPill({
+    thread: {
+      ...thread,
+      lastVisitedAt,
+    },
+  });
+
+  const supportsMultiplePullRequests = useSupportsMultiplePullRequests(thread.environmentId);
+  const pendingLink =
+    pr === null && supportsMultiplePullRequests
+      ? resolveThreadCurrentPullRequestLink(thread.pullRequests)
+      : null;
+
+  return (
+    <span
+      ref={statusRef}
+      className={
+        prStatus || threadStatus ? "inline-flex shrink-0 items-center gap-1.5" : "contents"
+      }
+    >
+      {prStatus && pr ? (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <span
+                aria-label={prStatus.tooltip}
+                className={`inline-flex items-center justify-center ${prStatus.colorClass}`}
+              />
+            }
+          >
+            <ChangeRequestStatusIcon state={pr.state} isDraft={pr.isDraft} className="size-3" />
+          </TooltipTrigger>
+          <TooltipPopup side="top">
+            <PrStatusTooltipContent status={prStatus} />
+          </TooltipPopup>
+        </Tooltip>
+      ) : null}
+      {pendingLink ? (
+        <PullRequestGlyph.pullRequest
+          className="size-3 text-muted-foreground"
+          aria-label={gt(
+            "{term, select, mr {MR} cr {change request} other {PR}} #{number}, status pending",
+            {
+              term: changeRequestTermKind(changeRequestTerminologyForUrl(pendingLink.url)),
+              number: pendingLink.number,
+            },
+          )}
+        />
+      ) : null}
+      {threadStatus ? <ThreadStatusLabel status={threadStatus} /> : null}
+    </span>
+  );
+}
+
+export function ThreadRowTrailingStatus({ thread }: { thread: SidebarThreadSummary }) {
+  const gt = useGT();
+  const m = useMessages();
+  const runningTerminalIds = useThreadRunningTerminalIds({
+    environmentId: thread.environmentId,
+    threadId: thread.id,
+  });
+  const environment = useEnvironment(thread.environmentId);
+  const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const isRemoteThread = thread.environmentId !== primaryEnvironmentId;
+  const remoteEnvLabel = environment?.label ?? null;
+  const threadEnvironmentLabel = isRemoteThread
+    ? (remoteEnvLabel ?? gt("Remote", { $context: "machine location" }))
+    : null;
+  const remoteMachine = resolveEnvironmentMachineKind(environment?.serverConfig ?? null);
+  const terminalStatus = terminalStatusFromRunningIds(runningTerminalIds, m);
+
+  if (!terminalStatus && !isRemoteThread) {
+    return null;
+  }
+
+  return (
+    <span className="inline-flex shrink-0 items-center gap-1.5">
+      {terminalStatus ? (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <span
+                role="img"
+                aria-label={terminalStatus.label}
+                className={`inline-flex items-center justify-center ${terminalStatus.colorClass}`}
+              />
+            }
+          >
+            <TerminalIcon
+              className={`size-3 ${terminalStatus.pulse ? "motion-safe:animate-status-pulse" : ""}`}
+              onAnimationStart={synchronizeTerminalPulse}
+            />
+          </TooltipTrigger>
+          <TooltipPopup side="top">{terminalStatus.label}</TooltipPopup>
+        </Tooltip>
+      ) : null}
+      {isRemoteThread ? (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <span
+                aria-label={
+                  threadEnvironmentLabel ?? gt("Remote", { $context: "machine location" })
+                }
+                className="inline-flex items-center justify-center"
+              />
+            }
+          >
+            <EnvironmentMachineIcon kind={remoteMachine} className="size-3 text-dim-foreground" />
+          </TooltipTrigger>
+          <TooltipPopup side="top">{threadEnvironmentLabel}</TooltipPopup>
+        </Tooltip>
+      ) : null}
+    </span>
+  );
+}
+
+function settledPrHoverColorClass(state: ThreadPullRequestBadge["state"]): string {
+  switch (state) {
+    case "draft":
+      return "group-hover/sidebar-row:text-dim-foreground";
+    case "open":
+      return "group-hover/sidebar-row:text-success-foreground";
+    case "merged":
+      return "group-hover/sidebar-row:text-merged-foreground";
+    case "closed":
+      return "group-hover/sidebar-row:text-error-foreground";
+  }
+}
+
+// Search rows are already buttons, so this renders the sidebar badge's look without its controls.
+export function ThreadSearchPullRequestNumber({
+  thread,
+  query,
+  enabled = true,
+  settled = false,
+}: {
+  thread: SidebarThreadSummary;
+  query: string;
+  enabled?: boolean;
+  settled?: boolean;
+}) {
+  const matched = pullRequestMatchesSearchQuery(thread, query);
+  const supportsMultiplePullRequests = useSupportsMultiplePullRequests(thread.environmentId);
+  const linked = useLinkedThreadPullRequest(
+    thread.environmentId,
+    thread.linkedPullRequest,
+    enabled && matched,
+    thread.pullRequests,
+    thread.branchPullRequest,
+  );
+  const m = useMessages();
+  if (!matched) return null;
+  const badge = supportsMultiplePullRequests
+    ? resolveThreadPullRequestBadge(thread.pullRequests)
+    : null;
+  const current = supportsMultiplePullRequests
+    ? resolveThreadCurrentPullRequestLink(thread.pullRequests)
+    : null;
+  const pr = linked?.pr ?? null;
+  // Stored references already carry a number, so the badge shows before PR details load.
+  const stored =
+    current ??
+    [thread.linkedPullRequest, thread.branchPullRequest].find(
+      (reference) =>
+        reference != null && pullRequestMatchesSearchQuery({ linkedPullRequest: reference }, query),
+    );
+  const presentation = resolveThreadPullRequestBadgePresentation(
+    {
+      badge,
+      number: pr?.number ?? stored?.number,
+      url: pr?.url ?? stored?.url,
+      status: prStatusIndicator(pr, linked?.sourceControlProvider, m),
+    },
+    m,
+  );
+  if (presentation === null) return null;
+  const aggregate = badge !== null && (badge.kind === "stack" || badge.others > 0);
+  const state = aggregate
+    ? badge.state
+    : pr === null
+      ? null
+      : pr.state === "open" && pr.isDraft
+        ? "draft"
+        : pr.state;
+  return (
+    <span
+      aria-label={presentation.label}
+      className={cn(
+        "inline-flex shrink-0 items-center gap-0.5 text-meta tabular-nums",
+        settled
+          ? cn("text-secondary-label transition-colors", state && settledPrHoverColorClass(state))
+          : presentation.toneClassName,
+      )}
+    >
+      {pr?.number !== undefined || stored?.number !== undefined ? (
+        <>
+          <span className="font-mono">#{pr?.number ?? stored?.number}</span>
+          {presentation.more > 0 ? <span className="opacity-60">+{presentation.more}</span> : null}
+        </>
+      ) : (
+        <>
+          <presentation.Icon aria-hidden className="size-3 shrink-0 text-current" />
+          <span>{presentation.text}</span>
+        </>
+      )}
+    </span>
+  );
+}

@@ -1,0 +1,84 @@
+name: CI
+
+# Manual only, so a private repository does not spend Actions minutes on every push.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Lint, types and translations
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
+
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@250f29ce396baf5e8f24498e17c0dfdebabc26eb # v1.15.0
+        with:
+          node-version-file: package.json
+          cache: false
+          run-install: false
+
+      - name: Install dependencies
+        run: vp install --frozen-lockfile
+
+      - name: Ensure Electron runtime is installed
+        run: vp run --filter @dacre/desktop ensure:electron
+
+      - name: Check unused code
+        run: vp run knip:check
+
+      - name: Check i18n catalogs
+        run: vp run i18n:check
+
+      - name: Check format and lint
+        run: vp check
+
+      - name: Typecheck
+        run: vp run typecheck
+
+  test:
+    name: Tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
+
+      - name: Install system packages
+        run: sudo apt-get update && sudo apt-get install -y libsecret-1-dev pkg-config xvfb jq
+
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@250f29ce396baf5e8f24498e17c0dfdebabc26eb # v1.15.0
+        with:
+          node-version-file: package.json
+          cache: false
+          run-install: false
+
+      - name: Install dependencies
+        run: vp install --frozen-lockfile
+
+      - name: Ensure Electron runtime is installed
+        run: vp run --filter @dacre/desktop ensure:electron
+
+      - name: Install test browsers
+        run: |
+          node apps/web/node_modules/playwright/cli.js install --with-deps --only-shell chromium
+          node apps/server/node_modules/playwright-core/cli.js install --only-shell chromium
+
+      - name: Run tests
+        run: xvfb-run -a vp run test

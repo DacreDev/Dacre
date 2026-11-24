@@ -1,0 +1,145 @@
+import { cva, type VariantProps } from "class-variance-authority";
+import type * as React from "react";
+
+import { cn } from "~/lib/utils";
+import { Input, type InputProps } from "~/components/ui/input";
+import { createPartPresence } from "~/components/ui/part-presence";
+
+type InputGroupPart = "control" | "inline-start" | "inline-end" | "block-start" | "block-end";
+const { PartPresenceContext, useParts, usePart } = createPartPresence<InputGroupPart>();
+
+const inputGroupVariants = cva(
+  "kbd-in-control relative inline-flex w-full min-w-0 items-center rounded-[var(--control-radius)] border text-prompt text-foreground has-[textarea]:h-auto data-[parts~=block-end]:h-auto data-[parts~=block-start]:h-auto data-[parts~=block-end]:flex-col data-[parts~=block-start]:flex-col has-[input:disabled,textarea:disabled]:opacity-64 data-[parts~=inline-start]:**:[[data-size=sm]_input]:ps-1.5 data-[parts~=inline-end]:**:[[data-size=sm]_input]:pe-1.5 *:[[data-slot=input-control],[data-slot=textarea-control]]:contents *:[[data-slot=input-control],[data-slot=textarea-control]]:before:hidden data-[parts~=block-start]:**:[input]:h-auto data-[parts~=block-end]:**:[input]:h-auto data-[parts~=inline-start]:**:[input]:ps-2 data-[parts~=inline-end]:**:[input]:pe-2 data-[parts~=block-end]:**:[input]:pt-1.5 data-[parts~=block-start]:**:[input]:pb-1.5 **:[textarea]:min-h-20.5 **:[textarea]:resize-none **:[textarea]:py-[calc(--spacing(3)-1px)] **:[textarea]:max-sm:min-h-23.5 **:[textarea_button]:rounded-[calc(var(--control-radius)-1px)]",
+  {
+    defaultVariants: {
+      variant: "default",
+      size: "default",
+    },
+    variants: {
+      size: {
+        default: null,
+        lg: "h-9",
+        sidebar:
+          "h-7 text-control font-normal [&_[data-slot=input]]:h-6.5 [&_[data-slot=input]]:leading-6.5 [&_[data-slot=input]]:px-1.5 [&_[data-slot=input-group-addon]]:ps-2",
+      },
+      variant: {
+        default:
+          "surface-well has-[input:focus-visible,textarea:focus-visible]:surface-focus has-[input[aria-invalid=true],textarea[aria-invalid=true]]:surface-invalid has-[input:focus-visible,textarea:focus-visible]:has-[input[aria-invalid=true],textarea[aria-invalid=true]]:surface-invalid-focus",
+        // A field floating over content (thread find): the popover surface.
+        popover:
+          "surface-popover rounded-card has-[input:focus-visible,textarea:focus-visible]:outline-2 has-[input:focus-visible,textarea:focus-visible]:outline-ring",
+        // A search field on chrome among ghost icon buttons: chrome-less at rest,
+        // the ghost button's hover fill, and the field focus stroke.
+        ghost:
+          "surface-ghost-field hover:surface-ghost-hover has-[input:focus-visible,input[data-focus-preview]]:surface-ghost-field-focus",
+      },
+    },
+  },
+);
+
+function InputGroup({
+  className,
+  variant,
+  size,
+  ...props
+}: React.ComponentProps<"div"> & VariantProps<typeof inputGroupVariants>) {
+  // The addons and the control inside, for the styles that depend on them.
+  const [parts, registerPart] = useParts();
+  return (
+    <PartPresenceContext value={registerPart}>
+      <div
+        className={cn(inputGroupVariants({ variant, size }), className)}
+        data-parts={parts.length > 0 ? parts.join(" ") : undefined}
+        data-slot="input-group"
+        role="group"
+        {...props}
+      />
+    </PartPresenceContext>
+  );
+}
+
+const inputGroupAddonVariants = cva(
+  "[&_svg]:-mx-0.5 flex h-auto cursor-text select-none items-center justify-center gap-2 leading-none in-[[data-slot=input-group][data-parts~=control]]:[&_svg:not([class*='size-'])]:size-4.5 sm:in-[[data-slot=input-group][data-parts~=control]]:[&_svg:not([class*='size-'])]:size-4 **:[svg:not([class*='text-']):not(button_*)]:text-muted-foreground",
+  {
+    defaultVariants: {
+      align: "inline-start",
+    },
+    compoundVariants: [
+      {
+        align: "inline-end",
+        inset: "pill",
+        className: "has-[>button]:me-0 pe-1 [[data-size=sm]+&]:pe-1 gap-0.5",
+      },
+      {
+        align: "inline-start",
+        inset: "pill",
+        className: "has-[>button]:ms-0 ps-1 [[data-size=sm]+&]:ps-1 gap-0.5",
+      },
+    ],
+    variants: {
+      inset: {
+        default: null,
+        pill: "[&_button]:rounded-full",
+      },
+      align: {
+        "block-end":
+          "order-last w-full justify-start px-[calc(--spacing(3)-1px)] pb-[calc(--spacing(3)-1px)] [.border-t]:pt-[calc(--spacing(3)-1px)] [[data-size=sm]+&]:px-[calc(--spacing(2.5)-1px)]",
+        "block-start":
+          "order-first w-full justify-start px-[calc(--spacing(3)-1px)] pt-[calc(--spacing(3)-1px)] [.border-b]:pb-[calc(--spacing(3)-1px)] [[data-size=sm]+&]:px-[calc(--spacing(2.5)-1px)]",
+        "inline-end":
+          "has-[>:last-child[data-slot=badge]]:-me-1.5 has-[>button]:-me-2 order-last pe-[calc(--spacing(3)-1px)] has-[>kbd:last-child]:me-[-0.35rem] [[data-size=sm]+&]:pe-[calc(--spacing(2.5)-1px)]",
+        "inline-start":
+          "has-[>:last-child[data-slot=badge]]:-ms-1.5 has-[>button]:-ms-2 order-first ps-[calc(--spacing(3)-1px)] has-[>kbd:last-child]:ms-[-0.35rem] [[data-size=sm]+&]:ps-[calc(--spacing(2.5)-1px)]",
+      },
+    },
+  },
+);
+
+function InputGroupAddon({
+  className,
+  align = "inline-start",
+  inset,
+  ...props
+}: React.ComponentProps<"div"> & VariantProps<typeof inputGroupAddonVariants>) {
+  usePart(align);
+  return (
+    <div
+      className={cn(inputGroupAddonVariants({ align, inset }), className)}
+      data-align={align}
+      data-slot="input-group-addon"
+      onMouseDown={(e) => {
+        if (e.button !== 0) return;
+        const target = e.target as HTMLElement;
+        const isInteractive = target.closest(
+          "button, a, input, select, textarea, [role='button'], [role='combobox'], [role='listbox'], [data-slot='select-trigger']",
+        );
+        if (isInteractive) return;
+        e.preventDefault();
+        const parent = e.currentTarget.parentElement;
+        const input = parent?.querySelector<HTMLInputElement | HTMLTextAreaElement>(
+          "input, textarea",
+        );
+        if (input && !parent?.querySelector("input:focus, textarea:focus")) {
+          input.focus();
+        }
+      }}
+      {...props}
+    />
+  );
+}
+
+function InputGroupInput({ className, ...props }: InputProps) {
+  usePart("control");
+  return <Input className={className} unstyled {...props} />;
+}
+
+/** A dim unit after the value, such as "days". Clicking it focuses the input. */
+function InputGroupUnit({ children }: { children: React.ReactNode }) {
+  return (
+    <InputGroupAddon align="inline-end">
+      <span className="text-meta text-dim-foreground">{children}</span>
+    </InputGroupAddon>
+  );
+}
+
+export { InputGroup, InputGroupAddon, InputGroupInput, InputGroupUnit };

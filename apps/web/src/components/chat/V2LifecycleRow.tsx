@@ -1,0 +1,961 @@
+import { T, msg, useGT, useMessages } from "gt-react";
+import { ThreadHoverCardPopup } from "../ThreadHoverCard";
+import { AgentElapsed } from "./AgentElapsed";
+import { projectedSubagentsToRuntime } from "@dacre/client-runtime/state/subagentRuntime";
+import { use, type ReactNode } from "react";
+import { useThreadShell, useProject } from "../../state/entities";
+import type { SideThreadOpenIntent } from "@dacre/client-runtime/side-thread";
+import { SideThreadsOpenContext, useSideThreadTrigger } from "../../hooks/useSideThreadTrigger";
+import { useLinkedThreadOpener } from "../../state/linkedThreadView";
+import { SubagentTooltipContent } from "./SubagentTooltipContent";
+import { useAtomValue } from "@effect/atom-react";
+import {
+  scopedThreadKey,
+  scopeThreadRef,
+  scopeProjectRef,
+} from "@dacre/client-runtime/environment";
+import { SubagentPendingApprovals } from "./ChildThreadApprovals";
+import { environmentThreadDetails } from "../../state/threads";
+import { EMPTY_SERVER_PROVIDERS, serverEnvironment } from "../../state/server";
+import { MiddleTruncate } from "../ui/middle-truncate";
+import * as DateTime from "effect/DateTime";
+import { WorkLogRow, WorkLogTarget, WorkLogVerb } from "./WorkLog";
+import {
+  resolveHandoffEndpoints,
+  type HandoffEndpoints,
+  type HandoffTimelineRun,
+  resolveModelSwitchChange,
+} from "@dacre/client-runtime/handoff";
+import {
+  formatSubagentDisplayTitle,
+  subagentCardDetail,
+} from "@dacre/client-runtime/state/subagent-display";
+import {
+  ProviderDriverKind,
+  type ModelSelection,
+  type OrchestrationV2ModelSwitch,
+  type OrchestrationV2Notification,
+  type OrchestrationV2TurnItem,
+  type OrchestrationV2RemoteTaskChild,
+  type OrchestrationV2Subagent,
+  type ProviderInstanceId,
+  type ServerProvider,
+  type ThreadId,
+  type EnvironmentId,
+  type NodeId,
+  type ScopedThreadRef,
+} from "@dacre/contracts";
+import type { TimestampFormat } from "@dacre/contracts/settings";
+import {
+  BotIcon,
+  CheckIcon,
+  CircleStopIcon,
+  XIcon,
+  ArrowRightLeftIcon,
+  ArrowRightIcon,
+  EraserIcon,
+  GitForkIcon,
+  MessageSquareIcon,
+} from "lucide-react";
+
+import { Tooltip, TooltipTrigger, TooltipPopup } from "../ui/tooltip";
+import {
+  applyProviderInstanceSettings,
+  brandProviderInstanceEntries,
+  deriveProviderInstanceEntries,
+  hasInstanceBadge,
+  shouldShowInstanceBadge,
+  type ProviderInstanceEntry,
+} from "../../providerInstances";
+import { formatShortTimestamp } from "../../timestampFormat";
+import { getTriggerDisplayModelName } from "./providerIconUtils";
+import { ProviderInstanceIcon, providerTextColor } from "./ProviderInstanceIcon";
+import { cn } from "~/lib/utils";
+import { formatModelSlugName } from "@dacre/shared/model";
+import { formatSubagentEffort } from "@dacre/client-runtime/state/thread-execution";
+import { Spinner } from "../ui/spinner";
+import { TimelineSystemDivider } from "./TimelineSystemDivider";
+import { subagentResumedSince } from "./V2LifecycleRow.logic";
+import { Button, InlineButton } from "../ui/button";
+import { DacreWordmark } from "../DacreWordmark";
+
+export type { HandoffTimelineRun } from "@dacre/client-runtime/handoff";
+
+export function V2LifecycleRow(props: {
+  readonly item: OrchestrationV2TurnItem;
+  readonly environmentId: EnvironmentId;
+  readonly resourceSummary?: boolean | undefined;
+  readonly runs: ReadonlyArray<HandoffTimelineRun>;
+  readonly onOpenThread: (
+    threadId: ThreadId,
+    environmentId?: EnvironmentId,
+    intent?: SideThreadOpenIntent,
+  ) => void;
+  /** Subagent members listed inside a group header render as flat one-line rows. */
+}) {
+  const { item } = props;
+  const gt = useGT();
+  if (item.type === "run_interrupt_result") {
+    return (
+      <TimelineSystemDivider
+        label={gt("Run interrupted")}
+        detail={item.message}
+        icon={CircleStopIcon}
+        wrapDetail
+        placement="turn"
+      />
+    );
+  }
+  if (item.type === "handoff") {
+    return (
+      <EnvironmentHandoffRow
+        environmentId={props.environmentId}
+        endpoints={resolveHandoffEndpoints(item, props.runs)}
+        failed={item.status === "failed"}
+      />
+    );
+  }
+  if (item.type === "fork") {
+    const relatedThreadId = item.source.type === "run" ? item.source.threadId : item.targetThreadId;
+    return (
+      <TimelineSystemDivider
+        label={
+          item.source.type === "run" ? gt("Forked from conversation") : gt("Conversation fork")
+        }
+        icon={GitForkIcon}
+        actionLabel={item.source.type === "run" ? gt("Open source conversation") : gt("Open fork")}
+        onAction={() => props.onOpenThread(relatedThreadId)}
+      />
+    );
+  }
+  if (item.type === "thread_created") {
+    if (props.resourceSummary) {
+      return (
+        <div
+          data-v2-item-type={item.type}
+          className="flex min-w-0 items-center gap-3 rounded-card border border-transparent surface-card p-3"
+        >
+          <span className="flex size-9 shrink-0 items-center justify-center rounded-control bg-muted">
+            <MessageSquareIcon className="size-4 text-muted-foreground" aria-hidden />
+          </span>
+          <span className="min-w-0 flex-1 truncate text-sm font-medium">
+            {item.title ?? gt("Created thread")}
+          </span>
+          <Button
+            size="xs"
+            variant="secondary"
+            aria-label={
+              item.title != null
+                ? gt("Open {title}", { title: item.title })
+                : gt("Open created thread")
+            }
+            onClick={() => props.onOpenThread(item.targetThreadId)}
+          >
+            <T>Open chat</T>
+          </Button>
+        </div>
+      );
+    }
+    return (
+      <WorkLogRow
+        data-v2-item-type={item.type}
+        icon={<DacreWordmark className="size-4 text-icon-muted" aria-hidden />}
+        label={
+          <span className="flex min-w-0 items-baseline gap-1.5">
+            <WorkLogVerb>
+              <T>Created thread</T>
+            </WorkLogVerb>
+            {item.title ? <WorkLogTarget>{item.title}</WorkLogTarget> : null}
+          </span>
+        }
+        trailing={
+          <InlineButton
+            aria-label={
+              item.title != null
+                ? gt("Open {title}", { title: item.title })
+                : gt("Open created thread")
+            }
+            onClick={() => props.onOpenThread(item.targetThreadId)}
+          >
+            <T>Open chat</T>
+          </InlineButton>
+        }
+      />
+    );
+  }
+  if (item.type === "subagent") {
+    return (
+      <SubagentTimelineLink
+        parentRef={scopeThreadRef(props.environmentId, item.threadId)}
+        subagentId={item.subagentId}
+        providerInstanceId={item.providerInstanceId}
+        origin={item.origin}
+        status={item.status}
+        driver={item.driver}
+        title={formatSubagentDisplayTitle(item.title ?? gt("Subagent"))}
+        result={item.result}
+        progress={item.progress}
+        startedAt={item.startedAt}
+        completedAt={item.completedAt}
+        threadId={item.childThreadId}
+        remote={item.remoteChild}
+        onOpenThread={props.onOpenThread}
+      />
+    );
+  }
+  return null;
+}
+
+const STATUS_VISUALS: Record<
+  OrchestrationV2TurnItem["status"],
+  { dotClass: string; label: string }
+> = {
+  pending: { dotClass: "bg-info", label: msg("Queued", { $context: "subagent status" }) },
+  running: { dotClass: "bg-info", label: msg("Running", { $context: "subagent status" }) },
+  waiting: { dotClass: "bg-info", label: msg("Waiting", { $context: "subagent status" }) },
+  idle: { dotClass: "bg-dim-foreground", label: msg("Idle", { $context: "subagent status" }) },
+  completed: { dotClass: "bg-success", label: msg("Completed", { $context: "subagent status" }) },
+  failed: { dotClass: "bg-destructive", label: msg("Failed", { $context: "subagent status" }) },
+  cancelled: {
+    dotClass: "bg-dim-foreground",
+    label: msg("Stopped", { $context: "subagent status" }),
+  },
+  interrupted: {
+    dotClass: "bg-dim-foreground",
+    label: msg("Stopped", { $context: "subagent status" }),
+  },
+};
+
+function subagentStatusVisual(status: OrchestrationV2TurnItem["status"]) {
+  return STATUS_VISUALS[status];
+}
+
+const SETTLED_SUBAGENT_STATUSES = new Set<OrchestrationV2TurnItem["status"]>([
+  "completed",
+  "failed",
+  "cancelled",
+  "interrupted",
+]);
+
+function isoOrNull(value: DateTime.Utc | null | undefined): string | null {
+  return value ? DateTime.formatIso(value) : null;
+}
+
+function SubagentElapsed({ agent }: { agent: Parameters<typeof AgentElapsed>[0]["agent"] }) {
+  return <AgentElapsed agent={agent} />;
+}
+
+function SubagentAvatar({
+  driver,
+  displayName,
+  iconUrl,
+  accentColor,
+  showBadge,
+  anyInstanceBadge,
+  status,
+  className,
+  plain,
+}: {
+  driver?: ProviderDriverKind | undefined;
+  displayName?: string | undefined;
+  iconUrl?: string | undefined;
+  accentColor?: string | undefined;
+  showBadge: boolean;
+  anyInstanceBadge: boolean;
+  status?: OrchestrationV2TurnItem["status"] | undefined;
+  className?: string;
+  /** The bare provider logo, for rows that show the status elsewhere. */
+  plain?: boolean | undefined;
+}) {
+  if (plain) {
+    return (
+      <span
+        aria-hidden
+        className={cn("inline-flex size-4 shrink-0 items-center justify-center", className)}
+      >
+        {driver ? (
+          <ProviderInstanceIcon
+            driverKind={driver}
+            displayName={displayName ?? driver}
+            accentColor={accentColor}
+            acpRegistryIconUrl={iconUrl}
+            showBadge={showBadge}
+            size="compact"
+            className="z-auto"
+            iconClassName="size-4"
+          />
+        ) : (
+          <BotIcon className="size-4 text-dim-foreground" />
+        )}
+      </span>
+    );
+  }
+  return (
+    <span
+      aria-hidden
+      className={cn(
+        "relative inline-flex size-6 shrink-0 items-center justify-center rounded-full border border-border/70 bg-muted ring-2 ring-background",
+        className,
+      )}
+    >
+      {driver ? (
+        <ProviderInstanceIcon
+          driverKind={driver}
+          displayName={displayName ?? driver}
+          accentColor={accentColor}
+          acpRegistryIconUrl={iconUrl}
+          showBadge={showBadge}
+          size="compact"
+          className="z-auto"
+          iconClassName="size-3.5"
+        />
+      ) : (
+        <BotIcon className="size-3.5 text-muted-foreground" />
+      )}
+      {status ? (
+        <span
+          className={cn(
+            "absolute -right-px size-2 rounded-full ring-2 ring-background",
+            anyInstanceBadge ? "-top-px" : "-bottom-px",
+            subagentStatusVisual(status).dotClass,
+          )}
+        />
+      ) : null}
+    </span>
+  );
+}
+
+// Select strings; status pushes replace providers even when avatar fields are unchanged.
+export function EnvironmentSubagentAvatar({
+  environmentId,
+  providerInstanceId,
+  driver,
+  remote,
+  ...props
+}: {
+  environmentId: EnvironmentId;
+  providerInstanceId: ProviderInstanceId;
+  className?: string;
+  driver?: ProviderDriverKind | undefined;
+  /** A task in a linked environment runs a provider instance there; its driver here is only a label. */
+  remote?: OrchestrationV2RemoteTaskChild | undefined;
+  status?: OrchestrationV2TurnItem["status"] | undefined;
+  plain?: boolean | undefined;
+}) {
+  const providerEnvironmentId = remote?.environmentId ?? environmentId;
+  const providersAtom = serverEnvironment.providersValueAtom(providerEnvironmentId);
+  const settings = useAtomValue(serverEnvironment.settingsValueAtom(providerEnvironmentId));
+  const entries = (providers: ReadonlyArray<ServerProvider> | null | undefined) => {
+    const derived = deriveProviderInstanceEntries(providers ?? []);
+    return settings ? brandProviderInstanceEntries(derived, settings) : derived;
+  };
+  const providerDriver = useAtomValue(
+    providersAtom,
+    (providers) =>
+      providers?.find((provider) => provider.instanceId === providerInstanceId)?.driver,
+  );
+  const displayName = useAtomValue(
+    providersAtom,
+    (providers) =>
+      entries(providers).find((entry) => entry.instanceId === providerInstanceId)?.displayName,
+  );
+  const accentColor = useAtomValue(
+    providersAtom,
+    (providers) =>
+      entries(providers).find((entry) => entry.instanceId === providerInstanceId)?.accentColor,
+  );
+  const showBadge = useAtomValue(providersAtom, (providers) => {
+    const all = entries(providers);
+    const entry = all.find((candidate) => candidate.instanceId === providerInstanceId);
+    return entry !== undefined && shouldShowInstanceBadge(entry, all);
+  });
+  const anyInstanceBadge = useAtomValue(providersAtom, (providers) =>
+    hasInstanceBadge(entries(providers)),
+  );
+  const iconUrl = useAtomValue(
+    providersAtom,
+    (providers) =>
+      providers?.find((provider) => provider.instanceId === providerInstanceId)?.iconUrl,
+  );
+  return (
+    <SubagentAvatar
+      {...props}
+      driver={providerDriver ?? (remote === undefined ? driver : undefined)}
+      displayName={displayName}
+      iconUrl={iconUrl}
+      accentColor={accentColor}
+      showBadge={showBadge}
+      anyInstanceBadge={anyInstanceBadge}
+    />
+  );
+}
+
+const NOTIFICATION_OUTCOME_STATUS: Record<
+  OrchestrationV2Notification["outcome"],
+  OrchestrationV2TurnItem["status"] | null
+> = {
+  completed: "completed",
+  failed: "failed",
+  cancelled: "cancelled",
+  updated: null,
+  unknown: null,
+};
+
+const NOTIFICATION_OUTCOME_LABEL: Record<OrchestrationV2Notification["outcome"], string> = {
+  completed: msg("Finished", { $context: "subagent task outcome" }),
+  failed: msg("Failed", { $context: "subagent task outcome" }),
+  cancelled: msg("Stopped", { $context: "subagent task outcome" }),
+  updated: msg("Updated", { $context: "subagent task outcome" }),
+  unknown: msg("Finished", { $context: "subagent task outcome" }),
+};
+
+export function SubagentNotificationLink(props: {
+  readonly parentRef: ScopedThreadRef;
+  readonly childThreadId: ThreadId;
+  readonly taskIds?: ReadonlyArray<NodeId> | undefined;
+  readonly outcome: OrchestrationV2Notification["outcome"];
+  readonly createdAt: string;
+  readonly timestampFormat: TimestampFormat;
+  readonly onOpenThread: (
+    threadId: ThreadId,
+    environmentId?: EnvironmentId,
+    intent?: SideThreadOpenIntent,
+  ) => void;
+  readonly fallback: ReactNode;
+}) {
+  const gt = useGT();
+  const m = useMessages();
+  // Follow-up tasks share a child conversation; this notice reports a particular task result.
+  const agent = useAtomValue(
+    environmentThreadDetails.threadAtom(props.parentRef),
+    (thread) =>
+      thread?.projection.subagents.find((agent) =>
+        props.taskIds === undefined
+          ? agent.childThreadId === props.childThreadId
+          : props.taskIds.includes(agent.id),
+      ) ?? null,
+  );
+  if (agent === null) return props.fallback;
+  const resumed =
+    NOTIFICATION_OUTCOME_STATUS[props.outcome] !== null &&
+    subagentResumedSince(agent, props.createdAt);
+  return (
+    <SubagentTimelineLink
+      parentRef={props.parentRef}
+      subagentId={agent.id}
+      providerInstanceId={agent.providerInstanceId}
+      origin={agent.origin}
+      status={agent.status}
+      driver={agent.driver}
+      title={formatSubagentDisplayTitle(agent.title ?? gt("Subagent"))}
+      result={agent.result}
+      progress={agent.progress}
+      startedAt={agent.startedAt}
+      completedAt={agent.completedAt}
+      threadId={props.childThreadId}
+      onOpenThread={props.onOpenThread}
+      {...(resumed
+        ? {}
+        : {
+            event: {
+              status: NOTIFICATION_OUTCOME_STATUS[props.outcome],
+              label: m(NOTIFICATION_OUTCOME_LABEL[props.outcome]),
+              timestamp: formatShortTimestamp(props.createdAt, props.timestampFormat),
+            },
+          })}
+    />
+  );
+}
+
+/** The row's trailing state: working, done or failed at a glance. */
+function SubagentStatusGlyph({ status }: { status: OrchestrationV2TurnItem["status"] }) {
+  const m = useMessages();
+  return (
+    <span className="flex size-3.5 shrink-0 items-center justify-center">
+      {status === "pending" || status === "running" || status === "waiting" ? (
+        <Spinner size="xs" tone="muted" aria-label={m(subagentStatusVisual(status).label)} />
+      ) : status === "completed" ? (
+        <CheckIcon aria-hidden className="size-3 text-success-foreground" />
+      ) : status === "failed" ? (
+        <XIcon aria-hidden className="size-3 text-error-foreground" />
+      ) : (
+        <span aria-hidden className="size-1.5 rounded-full bg-dim-foreground" />
+      )}
+    </span>
+  );
+}
+
+/** The model as the picker names it, with its effort. Selects a string, so a row re-renders only when that changes. */
+function SubagentModelLabel(props: {
+  readonly environmentId: EnvironmentId;
+  readonly providerInstanceId: ProviderInstanceId;
+  readonly model: string;
+  readonly modelSelection: OrchestrationV2Subagent["modelSelection"];
+}) {
+  const label = useAtomValue(
+    serverEnvironment.providersValueAtom(props.environmentId),
+    (providers) => {
+      const provider = providers?.find(
+        (candidate) => candidate.instanceId === props.providerInstanceId,
+      );
+      const model = provider?.models.find((candidate) => candidate.slug === props.model);
+      const name = model
+        ? getTriggerDisplayModelName(model, provider?.driver)
+        : formatModelSlugName(props.model);
+      const effort = formatSubagentEffort({
+        modelSlug: props.model,
+        modelSelection: props.modelSelection,
+        provider,
+      });
+      return effort ? `${name} ${effort}` : name;
+    },
+  );
+  return (
+    <span className="shrink-0 whitespace-nowrap text-caption text-muted-foreground max-sm:hidden">
+      {label}
+    </span>
+  );
+}
+
+function SubagentTimelineLink(props: {
+  readonly parentRef: ScopedThreadRef;
+  readonly subagentId: NodeId;
+  readonly providerInstanceId: ProviderInstanceId;
+  readonly origin: OrchestrationV2Subagent["origin"];
+  readonly driver: ProviderDriverKind;
+  readonly title: string;
+  readonly result: string | null;
+  readonly progress: string | undefined;
+  readonly status: OrchestrationV2TurnItem["status"];
+  readonly startedAt: DateTime.Utc | null;
+  readonly completedAt: DateTime.Utc | null;
+  readonly threadId: ThreadId | null;
+  /** The thread in a linked environment that runs this task, when it runs there. */
+  readonly remote?: OrchestrationV2RemoteTaskChild | undefined;
+  readonly onOpenThread: (
+    threadId: ThreadId,
+    environmentId?: EnvironmentId,
+    intent?: SideThreadOpenIntent,
+  ) => void;
+  readonly event?: {
+    readonly status: OrchestrationV2TurnItem["status"] | null;
+    readonly label: string;
+    readonly timestamp: string;
+  };
+}) {
+  const agent = useAtomValue(
+    environmentThreadDetails.threadAtom(props.parentRef),
+    (thread) => thread?.projection.subagents.find((agent) => agent.id === props.subagentId) ?? null,
+  );
+  const remote = props.remote ?? agent?.remoteChild;
+  const gt = useGT();
+  const m = useMessages();
+  const threadId = props.threadId;
+  // A task in a linked environment opens there, or read-only through this one.
+  const remoteOpener = useLinkedThreadOpener(props.parentRef, remote, props.title);
+  const trigger = useSideThreadTrigger();
+  const canOpen = use(SideThreadsOpenContext);
+  const open = !canOpen
+    ? null
+    : threadId !== null
+      ? (intent: SideThreadOpenIntent) => props.onOpenThread(threadId, undefined, intent)
+      : (remoteOpener?.open ?? null);
+  // A task on a connected linked environment opens there, on the main screen only.
+  const panel = threadId !== null || remoteOpener?.mode === "linked";
+  const liveStatus = agent?.status ?? props.status;
+  const status = props.event ? props.event.status : liveStatus;
+  const statusLabel = props.event?.label ?? m(subagentStatusVisual(liveStatus).label);
+  const result = (agent?.result ?? props.result)?.trim();
+  const progress = (agent?.progress ?? props.progress)?.trim();
+  const settled = SETTLED_SUBAGENT_STATUSES.has(status ?? liveStatus);
+  const rawDetail = settled ? result || progress : progress || result;
+  const detail = subagentCardDetail(rawDetail);
+  const failed = status === "failed";
+  const timing = {
+    status: liveStatus,
+    startedAt: isoOrNull(agent?.startedAt ?? props.startedAt),
+    completedAt: isoOrNull(agent?.completedAt ?? props.completedAt),
+  };
+  // One quiet line: logo, title, what it is doing, model, time, state.
+  const content = (
+    <>
+      <EnvironmentSubagentAvatar
+        environmentId={props.parentRef.environmentId}
+        providerInstanceId={props.providerInstanceId}
+        driver={props.driver}
+        remote={remote}
+        plain
+        // The tool rows' 24px icon column; the pull-back leaves their 5px gap to the label.
+        className="-me-0.75 size-6"
+      />
+      <span
+        className={cn(
+          "min-w-0 shrink truncate text-label text-foreground",
+          !props.event && "max-sm:flex-1",
+        )}
+      >
+        {props.title}
+      </span>
+      {remote !== undefined ? (
+        <span className="shrink-0 text-caption text-dim-foreground">
+          {gt("on {environment}", { environment: remote.label })}
+        </span>
+      ) : null}
+      <span
+        className={cn(
+          "min-w-0 flex-1 truncate text-body",
+          !props.event && "max-sm:hidden",
+          failed ? "text-error-foreground" : "text-dim-foreground",
+        )}
+      >
+        {detail === null ? null : detail.includes("/") && !detail.includes(" ") ? (
+          <MiddleTruncate value={detail} showTitle={false} className="flex" />
+        ) : (
+          detail
+        )}
+      </span>
+      {agent?.model ? (
+        <SubagentModelLabel
+          environmentId={remote?.environmentId ?? props.parentRef.environmentId}
+          providerInstanceId={props.providerInstanceId}
+          model={agent.model}
+          modelSelection={agent.modelSelection}
+        />
+      ) : null}
+      {props.event ? (
+        <span
+          className={cn(
+            "shrink-0 text-caption",
+            failed ? "text-error-foreground" : "text-muted-foreground",
+          )}
+        >
+          {statusLabel}
+        </span>
+      ) : null}
+      <span
+        className={cn(
+          "shrink-0 text-caption text-dim-foreground tabular-nums",
+          !props.event && "max-sm:hidden",
+        )}
+      >
+        {props.event ? props.event.timestamp : <SubagentElapsed agent={timing} />}
+      </span>
+      {props.event ? null : <SubagentStatusGlyph status={liveStatus} />}
+    </>
+  );
+  // The tool rows' metrics: 24px tall, flush left, the same end inset.
+  const className =
+    "group/subagent flex min-h-6 w-full min-w-0 items-center gap-2 rounded-md pe-1.5 text-left";
+  const childThreadKey =
+    props.event !== undefined
+      ? null
+      : remote !== undefined
+        ? scopedThreadKey(scopeThreadRef(remote.environmentId, remote.threadId))
+        : threadId !== null
+          ? scopedThreadKey(scopeThreadRef(props.parentRef.environmentId, threadId))
+          : null;
+  const row = (
+    <Tooltip>
+      <TooltipTrigger
+        delay={200}
+        render={
+          open === null ? (
+            <div data-v2-item-type="subagent" aria-description={statusLabel} className={className}>
+              {content}
+            </div>
+          ) : (
+            <button
+              type="button"
+              data-v2-item-type="subagent"
+              aria-label={gt("Open {title}", { title: props.title })}
+              aria-description={statusLabel}
+              {...trigger(open, { panel })}
+              className={cn(
+                className,
+                "cursor-pointer transition-colors hover:surface-ghost-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70",
+              )}
+            >
+              {content}
+            </button>
+          )
+        }
+      />
+      <ThreadHoverCardPopup>
+        <SubagentTimelineTooltip
+          {...props}
+          elapsed={agent ? <AgentElapsed agent={projectedSubagentsToRuntime([agent])[0]!} /> : null}
+          model={agent?.model ?? null}
+          modelSelection={agent?.modelSelection}
+          status={liveStatus}
+          result={agent?.result ?? props.result}
+          progress={agent?.progress ?? props.progress}
+        />
+      </ThreadHoverCardPopup>
+    </Tooltip>
+  );
+  if (childThreadKey === null) return row;
+  return (
+    <>
+      {row}
+      <SubagentPendingApprovals
+        childThreadKey={childThreadKey}
+        onOpenThread={open ? () => open("primary") : undefined}
+      />
+    </>
+  );
+}
+
+function SubagentTimelineTooltip(
+  props: Parameters<typeof SubagentTimelineLink>[0] & {
+    model: string | null;
+    modelSelection: OrchestrationV2Subagent["modelSelection"];
+    elapsed: ReactNode;
+  },
+) {
+  const environmentId = props.parentRef.environmentId;
+  // Read providers only in the open popup to avoid per-row subscriptions.
+  const providers =
+    useAtomValue(serverEnvironment.providersValueAtom(environmentId)) ?? EMPTY_SERVER_PROVIDERS;
+  const parent = useThreadShell(props.parentRef)?.source;
+  const child = useThreadShell(
+    props.threadId ? scopeThreadRef(environmentId, props.threadId) : null,
+  )?.source;
+  const parentProject = useProject(
+    parent ? scopeProjectRef(environmentId, parent.projectId) : null,
+  );
+  const childProject = useProject(child ? scopeProjectRef(environmentId, child.projectId) : null);
+  return (
+    <SubagentTooltipContent
+      title={formatSubagentDisplayTitle(child?.title ?? props.title)}
+      model={props.model}
+      providerInstanceId={props.providerInstanceId}
+      origin={props.origin}
+      modelSelection={props.modelSelection}
+      provider={providers.find((provider) => provider.instanceId === props.providerInstanceId)}
+      providers={providers}
+      driver={props.driver}
+      elapsed={props.elapsed}
+      status={props.status}
+      result={props.result}
+      progress={props.progress}
+      parentThread={parent}
+      childThread={child}
+      parentProject={parentProject ?? undefined}
+      childProject={childProject ?? undefined}
+    />
+  );
+}
+
+function EnvironmentHandoffRow({
+  environmentId,
+  ...props
+}: {
+  readonly environmentId: EnvironmentId;
+  readonly endpoints: HandoffEndpoints;
+  readonly failed: boolean;
+}) {
+  const providers =
+    useAtomValue(serverEnvironment.providersValueAtom(environmentId)) ?? EMPTY_SERVER_PROVIDERS;
+  return <HandoffRow {...props} environmentId={environmentId} providers={providers} />;
+}
+
+/** Marks where `/clear` or an automation started a new provider session in this thread. */
+export function FreshSessionRow() {
+  const gt = useGT();
+  return <TimelineSystemDivider label={gt("New session")} icon={EraserIcon} />;
+}
+
+/** A same-harness model or effort change. Shows only what changed. */
+export function ModelSwitchNote(props: {
+  readonly environmentId: EnvironmentId;
+  readonly modelSwitch: OrchestrationV2ModelSwitch;
+}) {
+  const providers =
+    useAtomValue(serverEnvironment.providersValueAtom(props.environmentId)) ??
+    EMPTY_SERVER_PROVIDERS;
+  const change = resolveModelSwitchChange(props.modelSwitch, providers);
+  if (change === null) return null;
+  const describe = (selection: ModelSelection, effort: string | undefined) => {
+    const provider = providers.find((candidate) => candidate.instanceId === selection.instanceId);
+    const model = provider?.models.find((candidate) => candidate.slug === selection.model);
+    const modelName = model ? getTriggerDisplayModelName(model, provider?.driver) : selection.model;
+    return [change.modelChanged ? modelName : null, effort].filter(Boolean).join(" ");
+  };
+  const { from, to } = props.modelSwitch;
+  const label = `${describe(from, change.effort?.from)} → ${describe(to, change.effort?.to)}`;
+  return <SwitchNote label={label} />;
+}
+
+export function HandoffNote(props: {
+  readonly environmentId: EnvironmentId;
+  readonly item: Extract<OrchestrationV2TurnItem, { type: "handoff" }>;
+  readonly runs: ReadonlyArray<HandoffTimelineRun>;
+}) {
+  const gt = useGT();
+  const providers =
+    useAtomValue(serverEnvironment.providersValueAtom(props.environmentId)) ??
+    EMPTY_SERVER_PROVIDERS;
+  const settings = useAtomValue(serverEnvironment.settingsValueAtom(props.environmentId));
+  const derived = deriveProviderInstanceEntries(providers);
+  const entries = settings ? applyProviderInstanceSettings(derived, settings, null) : derived;
+  const { from, to } = resolveHandoffEndpoints(props.item, props.runs);
+  const describe = (selection: HandoffEndpoints["from"][number]) => {
+    const provider = providers.find((candidate) => candidate.instanceId === selection.instanceId);
+    const model = provider?.models.find((candidate) => candidate.slug === selection.model);
+    const entry = entries.find((candidate) => candidate.instanceId === selection.instanceId);
+    return model
+      ? getTriggerDisplayModelName(model, provider?.driver)
+      : (selection.model ?? entry?.displayName ?? selection.instanceId);
+  };
+  const label = [...(from.length ? [from.map(describe).join(", ")] : []), describe(to)].join(" → ");
+  const providerName = (selection: HandoffEndpoints["from"][number]) =>
+    entries.find((candidate) => candidate.instanceId === selection.instanceId)?.displayName ??
+    selection.instanceId;
+  const detail = `${from.map(providerName).join(", ")} → ${providerName(to)}`;
+  return (
+    <SwitchNote
+      label={label}
+      handoff
+      failed={props.item.status === "failed"}
+      detail={
+        props.item.status === "failed"
+          ? gt("Context handoff failed: {providers}", { providers: detail })
+          : gt("Context handoff: {providers}", { providers: detail })
+      }
+    />
+  );
+}
+
+function SwitchNote(props: {
+  readonly label: string;
+  readonly handoff?: boolean;
+  readonly detail?: string;
+  readonly failed?: boolean;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <span
+            data-model-switch-note
+            tabIndex={0}
+            className={cn(
+              "min-w-0 truncate text-muted-foreground",
+              props.handoff ? "text-label" : "text-meta",
+              props.failed && "text-error-foreground",
+            )}
+          />
+        }
+      >
+        {props.label}
+      </TooltipTrigger>
+      <TooltipPopup side="top">
+        {props.detail ? <span className="block">{props.detail}</span> : null}
+        {props.label}
+      </TooltipPopup>
+    </Tooltip>
+  );
+}
+
+export function HandoffRow(props: {
+  readonly environmentId: EnvironmentId;
+  readonly endpoints: HandoffEndpoints;
+  readonly providers: ReadonlyArray<ServerProvider>;
+  readonly pending?: boolean;
+  readonly failed?: boolean;
+}) {
+  const gt = useGT();
+  const { from: fromEndpoints, to } = props.endpoints;
+  const settings = useAtomValue(serverEnvironment.settingsValueAtom(props.environmentId));
+  const derived = deriveProviderInstanceEntries(props.providers);
+  const entries = settings ? applyProviderInstanceSettings(derived, settings, null) : derived;
+  return (
+    <TimelineSystemDivider
+      label={props.pending ? gt("Context handoff pending") : gt("Context handoff")}
+      icon={ArrowRightLeftIcon}
+      tone={props.failed ? "danger" : "neutral"}
+      detail={
+        <span className="inline-flex min-w-0 flex-wrap items-center justify-center gap-1.5">
+          {fromEndpoints.map((endpoint, index) => (
+            <span
+              key={`${endpoint.instanceId}:${endpoint.model ?? ""}`}
+              className="inline-flex min-w-0 items-center"
+            >
+              <HandoffEndpoint
+                entries={entries}
+                instanceId={endpoint.instanceId}
+                model={endpoint.model}
+              />
+              {index < fromEndpoints.length - 1 ? (
+                <span aria-hidden="true" className="ml-0.5">
+                  ,
+                </span>
+              ) : null}
+            </span>
+          ))}
+          {fromEndpoints.length > 0 ? (
+            <ArrowRightIcon aria-hidden="true" className="size-3 shrink-0" />
+          ) : null}
+          <HandoffEndpoint entries={entries} instanceId={to.instanceId} model={to.model} />
+        </span>
+      }
+    />
+  );
+}
+
+function HandoffEndpoint(props: {
+  readonly entries: ReadonlyArray<ProviderInstanceEntry>;
+  readonly instanceId: ProviderInstanceId;
+  readonly model?: string | undefined;
+}) {
+  const entry = props.entries.find((candidate) => candidate.instanceId === props.instanceId);
+  const showBadge = entry !== undefined && shouldShowInstanceBadge(entry, props.entries);
+  const model = props.model?.trim();
+  const providerModel =
+    model === undefined || model.length === 0
+      ? undefined
+      : entry?.models.find((candidate) => candidate.slug === model);
+  const label =
+    providerModel !== undefined
+      ? getTriggerDisplayModelName(providerModel, entry?.driverKind)
+      : model !== undefined && model.length > 0
+        ? model
+        : (entry?.displayName ?? props.instanceId);
+  const labelColor = providerTextColor(
+    entry?.driverKind ?? ProviderDriverKind.make(props.instanceId),
+  );
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <span
+            tabIndex={0}
+            className="inline-flex min-w-0 items-center gap-1.5 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+          >
+            <ProviderInstanceIcon
+              driverKind={entry?.driverKind ?? ProviderDriverKind.make(props.instanceId)}
+              displayName={entry?.displayName ?? props.instanceId}
+              accentColor={entry?.accentColor}
+              acpRegistryAgentId={entry?.acpRegistryAgentId}
+              acpRegistryIconUrl={entry?.acpRegistryIconUrl}
+              showBadge={showBadge}
+              size="compact"
+              iconClassName={cn(showBadge && "opacity-60")}
+              indicatorBackground="var(--background)"
+            />
+            <span
+              className={cn("truncate text-label", labelColor.className)}
+              style={labelColor.style}
+            >
+              {label}
+            </span>
+          </span>
+        }
+      />
+      <TooltipPopup>
+        <span className="block">{entry?.displayName ?? props.instanceId}</span>
+        <span className="block">{label}</span>
+      </TooltipPopup>
+    </Tooltip>
+  );
+}

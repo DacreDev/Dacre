@@ -1,0 +1,142 @@
+import { DacreCHAT_PLAN_TUNNEL_LIMITS } from "@dacre/contracts/relay";
+import { TriangleAlertIcon } from "lucide-react";
+import { msg, T, useGT } from "gt-react";
+import type { ReactNode } from "react";
+
+import type { ManagedTunnelUpgrade } from "../../cloud/managedRelayState";
+import { m, type MessageResolver } from "../../i18n/messages";
+import { cn } from "../../lib/utils";
+import { Alert, AlertAction, AlertDescription, AlertTitle } from "../ui/alert";
+import { Button } from "../ui/button";
+
+// Above this, one slot per tunnel is too thin to read, so the bar fills instead.
+const MAX_SEGMENTS = 10;
+
+export const DacreCHAT_SUBSCRIPTION_URL = "https://chat.dacre.invalid/settings/subscription";
+
+/** Components pass `useMessages()` so the copy follows a language switch. */
+export function tunnelUpgradeCopy(
+  upgrade: Exclude<ManagedTunnelUpgrade, null>,
+  resolve: MessageResolver = m,
+): string {
+  const { pro, premier } = DacreCHAT_PLAN_TUNNEL_LIMITS;
+  switch (upgrade) {
+    case "link":
+      return resolve(
+        msg("Link Dacre Chat Pro for up to {pro} tunnels, or Premier for up to {premier}.", {
+          pro,
+          premier,
+        }),
+      );
+    case "pro":
+      return resolve(
+        msg("Upgrade to Dacre Chat Pro for up to {pro} tunnels, or Premier for up to {premier}.", {
+          pro,
+          premier,
+        }),
+      );
+    case "premier":
+      return resolve(
+        msg("Upgrade to Dacre Chat Premier for up to {premier} tunnels.", { premier }),
+      );
+  }
+}
+
+/** "2 of 3 tunnels in use" with one bar slot per tunnel. */
+export function TunnelUsageMeter({
+  used,
+  limit,
+  action,
+  className,
+}: {
+  readonly used: number;
+  readonly limit: number;
+  readonly action?: ReactNode;
+  readonly className?: string;
+}) {
+  const gt = useGT();
+  const full = used >= limit;
+  const fill = full ? "bg-warning" : "bg-foreground/72";
+  return (
+    <div className={cn("flex max-w-sm flex-col gap-1.5", className)}>
+      <div className="flex items-baseline justify-between gap-3 text-meta">
+        <span className={cn("tabular-nums", full ? "text-warning-foreground" : "text-foreground")}>
+          {gt("{used} of {limit} tunnels in use", { used, limit })}
+        </span>
+        {action}
+      </div>
+      <div
+        role="meter"
+        aria-label={gt("Dacre Connect tunnels in use")}
+        aria-valuemin={0}
+        aria-valuemax={limit}
+        aria-valuenow={used}
+        className="flex h-1.5 gap-1"
+      >
+        {limit <= MAX_SEGMENTS ? (
+          Array.from({ length: limit }, (_, index) => (
+            <span
+              key={index}
+              className={cn("flex-1 rounded-full", index < used ? fill : "bg-muted")}
+            />
+          ))
+        ) : (
+          <span className="flex-1 overflow-hidden rounded-full bg-muted">
+            <span
+              className={cn("block h-full rounded-full", fill)}
+              style={{ width: `${Math.min(100, (used / limit) * 100)}%` }}
+            />
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** Shown when the relay refuses a new tunnel because the account is at its cap. */
+export function TunnelLimitAlert({
+  upgrade,
+  onLinkDacreChat,
+  onManageTunnels,
+}: {
+  readonly upgrade: ManagedTunnelUpgrade;
+  readonly onLinkDacreChat: (() => void) | null;
+  readonly onManageTunnels: (() => void) | null;
+}) {
+  const gt = useGT();
+  const action =
+    upgrade === "link" && onLinkDacreChat ? (
+      <Button size="sm" onClick={onLinkDacreChat}>
+        <T>Link Dacre Chat</T>
+      </Button>
+    ) : upgrade === "pro" || upgrade === "premier" ? (
+      <Button
+        size="sm"
+        render={<a href={DacreCHAT_SUBSCRIPTION_URL} target="_blank" rel="noopener noreferrer" />}
+      >
+        <T>Upgrade on Dacre Chat</T>
+      </Button>
+    ) : onManageTunnels ? (
+      <Button size="sm" variant="secondary" onClick={onManageTunnels}>
+        <T>Manage tunnels</T>
+      </Button>
+    ) : null;
+  return (
+    <Alert variant="warning">
+      <TriangleAlertIcon />
+      <AlertTitle>
+        <T>You&apos;re out of tunnels (they cost us money).</T>
+      </AlertTitle>
+      <AlertDescription>
+        {upgrade === "link"
+          ? gt("Switch to Tailscale or get more tunnels by linking your Dacre Chat sub (sorry!)")
+          : upgrade
+            ? gt(
+                "Switch to Tailscale or get more tunnels by upgrading your Dacre Chat sub (sorry!)",
+              )
+            : gt("Switch to Tailscale or deregister an environment you no longer use (sorry!)")}
+      </AlertDescription>
+      {action ? <AlertAction>{action}</AlertAction> : null}
+    </Alert>
+  );
+}

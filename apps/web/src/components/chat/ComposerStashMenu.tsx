@@ -1,0 +1,311 @@
+import { msg, T, useGT, useMessages, Var } from "gt-react";
+import { CornerDownLeftIcon, FileIcon, XIcon } from "lucide-react";
+import { memo, use, useEffect, useEffectEvent, useRef, useState, type RefObject } from "react";
+import { assistantCitationsToPlainText } from "@dacre/shared/assistantCitations";
+import { replaceComposerContextReferences } from "@dacre/shared/composerContextReferences";
+import { composerFileLinksToPlainText } from "@dacre/shared/composerInlineTokens";
+
+import { RelativeTime } from "../RelativeTime";
+import { m, type MessageResolver } from "~/i18n/messages";
+import { cn, isMacPlatform } from "~/lib/utils";
+import { useLayoutPaneFocusedRef } from "../../layout/layoutPaneContext";
+import { Button } from "../ui/button";
+import { Kbd } from "../ui/kbd";
+import { type PromptStashEntry } from "../../promptStashStore";
+import { BackgroundThreadContext } from "./backgroundThread";
+
+const SNIPPET_MAX_CHARS = 90;
+
+function missingImageCount(entry: PromptStashEntry): number {
+  return entry.droppedImageNames.length + (entry.unreadableImageNames?.length ?? 0);
+}
+
+export function stashEntrySnippet(entry: PromptStashEntry, resolve: MessageResolver = m): string {
+  const trimmed = assistantCitationsToPlainText(
+    composerFileLinksToPlainText(
+      replaceComposerContextReferences(entry.prompt, (reference) => reference.label),
+    ),
+  )
+    .trim()
+    .replace(/\s+/g, " ");
+  if (trimmed.length > 0) {
+    if (trimmed.length <= SNIPPET_MAX_CHARS) return trimmed;
+    // Never end on a lone high surrogate, the first half of an emoji.
+    const last = trimmed.charCodeAt(SNIPPET_MAX_CHARS - 1);
+    const end = last >= 0xd800 && last <= 0xdbff ? SNIPPET_MAX_CHARS - 1 : SNIPPET_MAX_CHARS;
+    return `${trimmed.slice(0, end)}…`;
+  }
+  const imageCount = entry.attachments.length + entry.droppedImageNames.length;
+  const fileCount = entry.files?.length ?? 0;
+  const attachmentCount = imageCount + fileCount;
+  if (attachmentCount === 0) {
+    return resolve(msg("(empty)"));
+  }
+  if (imageCount > 0 && fileCount > 0) {
+    return resolve(
+      msg("{count, plural, one {({count} attachment)} other {({count} attachments)}}", {
+        count: attachmentCount,
+      }),
+    );
+  }
+  return fileCount > 0
+    ? resolve(
+        msg("{count, plural, one {({count} file)} other {({count} files)}}", {
+          count: attachmentCount,
+        }),
+      )
+    : resolve(
+        msg("{count, plural, one {({count} image)} other {({count} images)}}", {
+          count: attachmentCount,
+        }),
+      );
+}
+
+/** Window capture gives the focused pane's open menu priority over composer key handlers. */
+export const ComposerStashMenu = memo(function ComposerStashMenu(props: {
+  entries: ReadonlyArray<PromptStashEntry>;
+  stashShortcutLabel: string | null;
+  composerFormRef: RefObject<HTMLFormElement | null>;
+  onRestore: (entry: PromptStashEntry) => void;
+  onDelete: (entry: PromptStashEntry) => void;
+  onClose: () => void;
+}) {
+  const { entries, stashShortcutLabel, composerFormRef, onRestore, onDelete, onClose } = props;
+  const backgroundThread = use(BackgroundThreadContext);
+  const gt = useGT();
+  const m = useMessages();
+  const [highlightedId, setHighlightedId] = useState<string | null>(entries[0]?.id ?? null);
+  const paneFocusedRef = useLayoutPaneFocusedRef();
+
+  const highlightedEntry = entries.find((entry) => entry.id === highlightedId) ?? entries[0];
+  const drawerRef = useRef<HTMLDivElement>(null);
+
+  // Both listeners read entries, highlight and callbacks at event time, so they subscribe
+  // once for the menu's lifetime instead of on every highlight change.
+  const closeOnOutsidePointer = useEffectEvent((event: PointerEvent) => {
+    const drawer = drawerRef.current;
+    if (
+      (drawer && event.composedPath().includes(drawer)) ||
+      (event.target instanceof Element && event.target.closest('[data-prompt-stash-badge="true"]'))
+    ) {
+      return;
+    }
+    onClose();
+  });
+
+  const handleKeyDown = useEffectEvent((event: KeyboardEvent) => {
+    if (backgroundThread || !paneFocusedRef.current) return;
+    if (event.isComposing || event.keyCode === 229) return;
+    const drawer = drawerRef.current;
+    if (!drawer) return;
+    const target = event.target;
+    if (
+      !(target instanceof Node) ||
+      (target !== document.body &&
+        !(target instanceof Element && target.closest('[data-prompt-stash-badge="true"]')) &&
+        !drawer.contains(target) &&
+        !composerFormRef.current?.querySelector('textarea, [role="textbox"]')?.contains(target))
+    ) {
+      return;
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      onClose();
+      return;
+    }
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      if (entries.length === 0) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const currentIndex = entries.findIndex((entry) => entry.id === highlightedEntry?.id);
+      const offset = event.key === "ArrowDown" ? 1 : -1;
+      const normalizedIndex = currentIndex >= 0 ? currentIndex : offset === 1 ? -1 : 0;
+      const nextIndex = (normalizedIndex + offset + entries.length) % entries.length;
+      setHighlightedId(entries[nextIndex]?.id ?? null);
+      const nextButton =
+        drawer.querySelectorAll<HTMLButtonElement>("[data-stash-restore]")[nextIndex];
+      nextButton?.scrollIntoView({ block: "nearest" });
+      if (drawer.contains(document.activeElement)) {
+        nextButton?.focus({ preventScroll: true });
+      }
+      return;
+    }
+    if (event.key === "Enter") {
+      // Let the delete button handle Enter instead of restoring its row.
+      if (event.target instanceof HTMLElement && event.target.closest("button[aria-label]")) {
+        return;
+      }
+      if (!highlightedEntry) return;
+      event.preventDefault();
+      event.stopPropagation();
+      onRestore(highlightedEntry);
+      return;
+    }
+    if (event.key === "Backspace" && (event.metaKey || event.ctrlKey)) {
+      if (!highlightedEntry) return;
+      event.preventDefault();
+      event.stopPropagation();
+      onDelete(highlightedEntry);
+    }
+  });
+
+  // oxlint-disable-next-line dacre/no-unreasoned-state-sync -- subscribes capture-phase pointerdown and keydown listeners for outside close and keyboard navigation
+  useEffect(() => {
+    const onPointerDown = (event: PointerEvent) => closeOnOutsidePointer(event);
+    const onKeyDown = (event: KeyboardEvent) => handleKeyDown(event);
+    document.addEventListener("pointerdown", onPointerDown, true);
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown, true);
+      window.removeEventListener("keydown", onKeyDown, true);
+    };
+  }, []);
+
+  const deleteKey = isMacPlatform(navigator.platform) ? "⌘⌫" : "Ctrl ⌫";
+
+  return (
+    <div
+      ref={drawerRef}
+      data-composer-stash-drawer="true"
+      className="relative isolate flex min-h-0 w-full min-w-0 flex-col gap-px rounded-card p-1.5 kbd-in-popover before:pointer-events-none before:absolute before:inset-0 before:-z-1 before:rounded-card before:surface-popover"
+    >
+      <div className="flex shrink-0 items-center px-2.5 py-1.5 text-meta">
+        <span className="text-foreground">
+          {gt("Stash", { $context: "noun, saved prompts set aside for later" })}
+        </span>
+        <span className="flex-1" />
+        <span className="text-dim-foreground">
+          {gt("{count, plural, one {{count} prompt} other {{count} prompts}}", {
+            count: entries.length,
+          })}
+        </span>
+      </div>
+      <ul
+        role="list"
+        aria-label={gt("Stashed prompts")}
+        className="flex max-h-72 min-h-0 flex-col gap-px overflow-y-auto"
+      >
+        {entries.length === 0 ? (
+          <li className="px-2.5 py-2 text-body text-muted-foreground">
+            <T>Nothing stashed yet.</T>
+            {stashShortcutLabel ? (
+              <>
+                {" "}
+                <T>
+                  Press <Var>{stashShortcutLabel}</Var> with a prompt in the composer to stash it.
+                </T>
+              </>
+            ) : null}
+          </li>
+        ) : (
+          entries.map((entry) => {
+            const highlighted = highlightedEntry?.id === entry.id;
+            return (
+              <li
+                key={entry.id}
+                data-stash-entry={entry.id}
+                data-highlighted={highlighted || undefined}
+                className={cn(
+                  "relative flex h-8.5 min-w-0 shrink-0 items-center gap-2.5 rounded-control px-2.5 text-body",
+                  highlighted && "surface-selected",
+                )}
+                onMouseMove={() => {
+                  if (highlightedId !== entry.id) setHighlightedId(entry.id);
+                }}
+                onFocus={() => setHighlightedId(entry.id)}
+              >
+                <CornerDownLeftIcon
+                  aria-hidden
+                  className={cn(
+                    "size-3.75 shrink-0",
+                    highlighted ? "text-foreground" : "text-muted-foreground",
+                  )}
+                />
+                <button
+                  type="button"
+                  className={cn(
+                    "min-w-0 flex-1 cursor-pointer truncate text-left text-label outline-none before:absolute before:inset-0 before:rounded-control focus-visible:before:ring-2 focus-visible:before:ring-inset focus-visible:before:ring-ring",
+                    highlighted ? "text-strong-foreground" : "text-foreground",
+                  )}
+                  data-stash-restore={entry.id}
+                  aria-label={gt("Restore stashed prompt: {snippet}", {
+                    snippet: stashEntrySnippet(entry, m),
+                  })}
+                  onPointerDown={(event) => event.preventDefault()}
+                  onClick={() => onRestore(entry)}
+                >
+                  {stashEntrySnippet(entry, m)}
+                </button>
+                {entry.pendingImageCount ? (
+                  <span className="shrink-0 text-meta text-muted-foreground">
+                    {gt(
+                      "{count, plural, one {saving {count} image…} other {saving {count} images…}}",
+                      { count: entry.pendingImageCount },
+                    )}
+                  </span>
+                ) : missingImageCount(entry) > 0 ? (
+                  <span className="shrink-0 text-meta text-warning-foreground">
+                    {gt(
+                      "{count, plural, one {{count} image dropped} other {{count} images dropped}}",
+                      { count: missingImageCount(entry) },
+                    )}
+                  </span>
+                ) : null}
+                {entry.attachments.length > 0 ? (
+                  <span className="flex shrink-0 items-center -space-x-1.5">
+                    {entry.attachments.slice(0, 3).map((attachment) => (
+                      <img
+                        key={attachment.id}
+                        src={attachment.dataUrl}
+                        alt=""
+                        aria-hidden="true"
+                        className="size-4 rounded border border-border/70 object-cover"
+                      />
+                    ))}
+                  </span>
+                ) : null}
+                {(entry.files?.length ?? 0) > 0 ? (
+                  <span className="flex shrink-0 items-center gap-1 text-meta text-muted-foreground">
+                    <FileIcon className="size-3" aria-hidden />
+                    {entry.files!.length}
+                  </span>
+                ) : null}
+                <time
+                  dateTime={entry.createdAt}
+                  className="shrink-0 text-meta text-dim-foreground tabular-nums max-sm:hidden"
+                >
+                  <RelativeTime timestamp={entry.createdAt} />
+                </time>
+                <Button
+                  variant="ghost-muted"
+                  size="icon-micro"
+                  className="relative z-10"
+                  aria-label={gt("Delete stashed prompt")}
+                  onPointerDown={(event) => event.preventDefault()}
+                  onClick={() => onDelete(entry)}
+                >
+                  <XIcon aria-hidden />
+                </Button>
+              </li>
+            );
+          })
+        )}
+      </ul>
+      <div className="flex items-center gap-3 border-t border-(--chat-composer-outline) px-2.5 pt-2 pb-1 text-caption text-dim-foreground">
+        <span className="flex items-center gap-1.25">
+          <Kbd>⏎</Kbd>
+          {gt("Restore", { $context: "verb, restores the highlighted stashed prompt" })}
+        </span>
+        <span className="flex items-center gap-1.25">
+          <Kbd>{deleteKey}</Kbd>
+          {gt("Delete", { $context: "verb, deletes the highlighted stashed prompt" })}
+        </span>
+        <span className="flex items-center gap-1.25">
+          <Kbd>esc</Kbd>
+          {gt("Close")}
+        </span>
+      </div>
+    </div>
+  );
+});

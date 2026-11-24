@@ -1,0 +1,344 @@
+import { tooltipSafeFinalFocus } from "./focus-return";
+import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
+import { useRender } from "@base-ui/react/use-render";
+import { useGT } from "gt-react";
+import { XIcon } from "lucide-react";
+import {
+  type ComponentProps,
+  type CSSProperties,
+  createContext,
+  type ReactNode,
+  use,
+  useId,
+  useRef,
+  useState,
+} from "react";
+import { cn } from "~/lib/utils";
+import { useNativeTitlebarHeight } from "~/lib/windowControlsOverlay";
+import { Button, type ButtonVariant } from "~/components/ui/button";
+import {
+  DIALOG_APP_POPUP_CLASS,
+  DIALOG_APP_PANEL_POPUP_CLASS,
+  DIALOG_APP_PANEL_BACKDROP_CLASS,
+  DIALOG_BACKDROP_CLASS,
+  DIALOG_MEDIA_BACKDROP_CLASS,
+  DIALOG_MEDIA_POPUP_CLASS,
+  DIALOG_MOBILE_SHEET_CLASS,
+  DIALOG_POPUP_CLASS,
+} from "~/components/ui/dialog-styles";
+import { ScrollArea } from "~/components/ui/scroll-area";
+import { createPartPresence } from "~/components/ui/part-presence";
+
+const { PartPresenceContext, useParts, usePart } = createPartPresence<"header">();
+
+const ControlledOpenContext = createContext<boolean | undefined>(undefined);
+
+function RetainedWhileClosed({ open, children }: { open: boolean; children: ReactNode }) {
+  const controlledOpen = use(ControlledOpenContext);
+  const isOpen = open && controlledOpen !== false;
+  const [retained, setRetained] = useState(children);
+  if (isOpen && retained !== children) {
+    setRetained(children);
+  }
+  return isOpen ? children : retained;
+}
+
+function renderRetainedPopup(props: ComponentProps<"div">, state: { open: boolean }) {
+  return (
+    <div {...props}>
+      <RetainedWhileClosed open={state.open}>{props.children}</RetainedWhileClosed>
+    </div>
+  );
+}
+
+function Dialog<Payload>(props: DialogPrimitive.Root.Props<Payload>) {
+  return (
+    <ControlledOpenContext value={props.open}>
+      <DialogPrimitive.Root {...props} />
+    </ControlledOpenContext>
+  );
+}
+
+function useDialogActionInitialFocus() {
+  const popupRef = useRef<HTMLDivElement>(null);
+  const initialFocus = (openType: string) => {
+    // Match Base UI: touch opens focus the popup to avoid opening the virtual keyboard.
+    if (openType === "touch") return popupRef.current;
+    return (
+      popupRef.current?.querySelector<HTMLElement>(
+        '[data-slot="dialog-action"]:not(:disabled):not([aria-disabled="true"])',
+      ) ?? true
+    );
+  };
+  return { popupRef, initialFocus };
+}
+
+const DialogPortal = DialogPrimitive.Portal;
+
+function DialogTrigger(props: DialogPrimitive.Trigger.Props) {
+  return <DialogPrimitive.Trigger data-slot="dialog-trigger" {...props} />;
+}
+
+function DialogClose(props: DialogPrimitive.Close.Props) {
+  return <DialogPrimitive.Close data-slot="dialog-close" {...props} />;
+}
+
+function DialogBackdrop({
+  className,
+  variant = "default",
+  ...props
+}: DialogPrimitive.Backdrop.Props & { variant?: "default" | "media" | "panel" }) {
+  return (
+    <DialogPrimitive.Backdrop
+      forceRender
+      className={cn(
+        variant === "media"
+          ? DIALOG_MEDIA_BACKDROP_CLASS
+          : variant === "panel"
+            ? DIALOG_APP_PANEL_BACKDROP_CLASS
+            : DIALOG_BACKDROP_CLASS,
+        className,
+      )}
+      data-slot="dialog-backdrop"
+      {...props}
+    />
+  );
+}
+
+function DialogViewport({
+  className,
+  variant = "default",
+  ...props
+}: DialogPrimitive.Viewport.Props & { variant?: "default" | "app" }) {
+  return (
+    <DialogPrimitive.Viewport
+      // Electron drag regions ignore z-index, so without no-drag a click over a header drag strip never reaches the page.
+      className={cn(
+        "fixed inset-0 z-50 grid justify-items-center [-webkit-app-region:no-drag]",
+        variant === "app"
+          ? "grid-rows-1 items-center sm:p-6 sm:pt-(--app-modal-sm-top) lg:p-10"
+          : "grid-rows-[1fr_auto_1fr] p-4",
+        className,
+      )}
+      data-slot="dialog-viewport"
+      {...props}
+    />
+  );
+}
+
+function DialogPopup({
+  className,
+  children,
+  showCloseButton = true,
+  bottomStickOnMobile = true,
+  variant = "default",
+  mediaControlsPlacement = "outside",
+  viewportProps,
+  placement = "center",
+  contentInset = 0,
+  ...props
+}: DialogPrimitive.Popup.Props & {
+  showCloseButton?: boolean;
+  bottomStickOnMobile?: boolean;
+  variant?: "default" | "media" | "app" | "app-panel";
+  mediaControlsPlacement?: "inside" | "outside";
+  viewportProps?: Omit<DialogPrimitive.Viewport.Props, "className">;
+  placement?: "center" | "content-top";
+  contentInset?: number;
+}) {
+  const gt = useGT();
+  const [parts, registerPart] = useParts();
+  const defaultId = useId();
+  const popupId = props.id ?? defaultId;
+  const { popupRef, initialFocus } = useDialogActionInitialFocus();
+  const popup = useRender({
+    ref: popupRef,
+    render: (
+      <DialogPrimitive.Popup
+        className={cn(
+          variant === "media"
+            ? DIALOG_MEDIA_POPUP_CLASS
+            : variant === "app-panel"
+              ? DIALOG_APP_PANEL_POPUP_CLASS
+              : variant === "app"
+                ? DIALOG_APP_POPUP_CLASS
+                : DIALOG_POPUP_CLASS,
+          variant === "app" || variant === "app-panel"
+            ? "text-foreground"
+            : "row-start-2 text-popover-foreground",
+          variant === "default" && "max-h-full max-w-lg",
+          bottomStickOnMobile &&
+            variant !== "app" &&
+            variant !== "app-panel" &&
+            DIALOG_MOBILE_SHEET_CLASS,
+          className,
+        )}
+        data-has-header={parts.length > 0 ? "" : undefined}
+        data-slot="dialog-popup"
+        initialFocus={initialFocus}
+        render={renderRetainedPopup}
+        {...props}
+        id={popupId}
+        finalFocus={tooltipSafeFinalFocus(props.finalFocus, popupId)}
+      >
+        <PartPresenceContext value={registerPart}>{children}</PartPresenceContext>
+        {showCloseButton && (
+          <DialogPrimitive.Close
+            aria-label={gt("Close", { $context: "button, closes the dialog" })}
+            className="absolute end-2 top-2"
+            render={<Button size="icon" variant="ghost" />}
+          >
+            <XIcon />
+          </DialogPrimitive.Close>
+        )}
+      </DialogPrimitive.Popup>
+    ),
+  });
+  // macOS has no CSS window-controls overlay, so use the platform titlebar height.
+  const nativeTitlebarHeight = useNativeTitlebarHeight();
+  return (
+    <DialogPortal>
+      {/* Media opens from inside other overlays (a composer chip, a popover), so it sits above them. */}
+      <DialogBackdrop
+        className={variant === "media" ? "z-[60]" : undefined}
+        variant={variant === "media" ? "media" : variant === "app-panel" ? "panel" : "default"}
+      />
+      <DialogViewport
+        variant={variant === "app" || variant === "app-panel" ? "app" : "default"}
+        {...viewportProps}
+        style={{
+          ...viewportProps?.style,
+          ...(placement === "content-top" ? { "--dialog-content-inset": `${contentInset}px` } : {}),
+          ...(variant === "media"
+            ? ({ "--media-dialog-titlebar-height": `${nativeTitlebarHeight}px` } as CSSProperties)
+            : {}),
+        }}
+        className={cn(
+          placement === "content-top" &&
+            "sm:grid-rows-[0_auto_1fr] sm:pt-[min(23.611dvh,170px)] sm:ps-[calc(var(--dialog-content-inset)+1rem)]",
+          variant === "app-panel" && "max-sm:p-2",
+          bottomStickOnMobile && "max-sm:grid-rows-[1fr_auto] max-sm:p-0 max-sm:pt-12",
+          variant === "media" &&
+            "z-[60] grid-rows-1 place-items-center px-4 max-[8rem]:px-0 pb-6 pt-[calc(var(--media-dialog-titlebar-height,0px)+1.5rem)] [-webkit-app-region:no-drag]",
+          variant === "media" &&
+            mediaControlsPlacement === "inside" &&
+            "pt-[min(calc(var(--media-dialog-titlebar-height,0px)+1.5rem),50dvh)]",
+        )}
+      >
+        {popup}
+      </DialogViewport>
+    </DialogPortal>
+  );
+}
+
+type DialogActionProps = Omit<React.ComponentProps<typeof Button>, "variant"> & {
+  variant?: Exclude<ButtonVariant, `${string}destructive${string}`>;
+};
+
+function DialogAction(props: DialogActionProps) {
+  return <Button data-slot="dialog-action" {...props} />;
+}
+
+function DialogHeader({ className, ...props }: React.ComponentProps<"div">) {
+  usePart("header");
+  return (
+    <div
+      className={cn("flex flex-col gap-1 px-5 pt-5 pb-4", className)}
+      data-slot="dialog-header"
+      {...props}
+    />
+  );
+}
+
+function DialogFooter({
+  className,
+  variant = "default",
+  ...props
+}: React.ComponentProps<"div"> & {
+  variant?: "default" | "bare";
+}) {
+  return (
+    <div
+      className={cn(
+        "flex flex-col-reverse gap-2 px-5 pb-4 sm:flex-row sm:justify-end sm:rounded-b-[calc(var(--radius-pane)-1px)]",
+        className,
+      )}
+      data-slot="dialog-footer"
+      data-variant={variant}
+      {...props}
+    />
+  );
+}
+
+function DialogTitle({
+  className,
+  size = "default",
+  ...props
+}: DialogPrimitive.Title.Props & { size?: "default" | "page" }) {
+  return (
+    <DialogPrimitive.Title
+      className={cn(
+        "wrap-anywhere text-strong-foreground",
+        size === "page"
+          ? "text-title"
+          : "text-label [font-size:0.9375rem] font-semibold leading-snug",
+        className,
+      )}
+      data-slot="dialog-title"
+      {...props}
+    />
+  );
+}
+
+function DialogDescription({ className, ...props }: DialogPrimitive.Description.Props) {
+  return (
+    <DialogPrimitive.Description
+      className={cn(
+        "text-body sm:[font-size:0.8125rem] leading-[1.45] text-muted-foreground",
+        className,
+      )}
+      data-slot="dialog-description"
+      {...props}
+    />
+  );
+}
+
+function DialogPanel({
+  className,
+  scrollFade = true,
+  ...props
+}: React.ComponentProps<"div"> & { scrollFade?: boolean }) {
+  return (
+    <ScrollArea scrollFade={scrollFade}>
+      <div
+        className={cn(
+          "space-y-4 px-5 pt-5 pb-4 in-[[data-slot=dialog-popup][data-has-header]]:pt-0",
+          className,
+        )}
+        data-slot="dialog-panel"
+        {...props}
+      />
+    </ScrollArea>
+  );
+}
+
+export {
+  ControlledOpenContext,
+  renderRetainedPopup,
+  Dialog,
+  DialogTrigger,
+  DialogPortal,
+  DialogClose,
+  DialogAction,
+  useDialogActionInitialFocus,
+  DialogBackdrop,
+  DialogBackdrop as DialogOverlay,
+  DialogPopup,
+  DialogPopup as DialogContent,
+  DialogHeader,
+  DialogFooter,
+  DialogTitle,
+  DialogDescription,
+  DialogPanel,
+  DialogViewport,
+};

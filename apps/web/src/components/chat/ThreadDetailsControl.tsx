@@ -1,0 +1,130 @@
+import { mergeProps } from "@base-ui/react/merge-props";
+import { useRender } from "@base-ui/react/use-render";
+import { T, Var } from "gt-react";
+import type { ComponentProps } from "react";
+
+import { cn } from "~/lib/utils";
+import { Button } from "../ui/button";
+import {
+  THREAD_DETAILS_PANEL_ROW_CLASS,
+  THREAD_DETAILS_PANEL_CHOICE_ROW_CLASS,
+  THREAD_DETAILS_PANEL_ICON_ACTION_CLASS,
+  THREAD_DETAILS_PANEL_META_ACTION_CLASS,
+  THREAD_DETAILS_PANEL_CHEVRON_CLASS,
+} from "./threadDetailsPanelStyles";
+import { ChevronDownIcon, ChevronRightIcon, ChevronUpIcon } from "lucide-react";
+
+const parts = {
+  row: THREAD_DETAILS_PANEL_ROW_CLASS,
+  heading:
+    // oxlint-disable-next-line dacre/no-untranslated-copy -- class names, not copy
+    "flex min-w-0 flex-1 items-center gap-2 rounded-md text-left text-caption text-muted-foreground hover:text-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+  usage:
+    "col-span-full col-start-1 row-start-1 grid min-w-0 grid-cols-subgrid items-center rounded-md text-left text-meta text-muted-foreground hover:text-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+  choice: THREAD_DETAILS_PANEL_CHOICE_ROW_CLASS,
+  icon: THREAD_DETAILS_PANEL_ICON_ACTION_CLASS,
+  meta: THREAD_DETAILS_PANEL_META_ACTION_CLASS,
+};
+
+export function ThreadDetailsControl({
+  panel = true,
+  part = "row",
+  multiline = false,
+  tone = "default",
+  chevronAlign = "text",
+  className,
+  children,
+  size = "default",
+  variant = "default",
+  render,
+  ...props
+}: ComponentProps<typeof Button> & {
+  panel?: boolean;
+  part?: keyof typeof parts;
+  multiline?: boolean;
+  tone?: "default" | "muted" | "primary" | "destructive";
+  /** A choice row's chevron lines up with the text or the 12px icons ending the rows around it. */
+  chevronAlign?: "text" | "icon";
+}) {
+  const control = useRender({
+    defaultTagName: "button",
+    render,
+    props: mergeProps<"button">(
+      {
+        type: render ? undefined : "button",
+        ...({ "data-part": part } as Record<string, string>),
+        className: cn(
+          parts[part],
+          multiline && "h-auto min-h-9 py-1.5 disabled:opacity-100 sm:h-auto sm:min-h-9",
+          tone === "muted" && "text-muted-foreground hover:text-foreground",
+          tone === "primary" && "text-primary hover:text-primary",
+          tone === "destructive" &&
+            "text-destructive-foreground hover:text-destructive-foreground data-pressed:text-destructive-foreground",
+          className,
+        ),
+      },
+      props,
+      {
+        children:
+          part === "choice" ? (
+            <>
+              {children}
+              <ChevronRightIcon
+                className={cn(
+                  THREAD_DETAILS_PANEL_CHEVRON_CLASS,
+                  chevronAlign === "icon" && "me-0",
+                )}
+              />
+            </>
+          ) : (
+            children
+          ),
+      },
+    ),
+  });
+  if (!panel) {
+    return (
+      <Button
+        {...props}
+        render={render}
+        size={multiline ? "sm-multiline" : size}
+        variant={variant}
+        className={className}
+      >
+        {children}
+      </Button>
+    );
+  }
+  return control;
+}
+
+export function ThreadDetailsMoreButton({
+  expanded,
+  remaining,
+  onToggle,
+}: {
+  expanded: boolean;
+  remaining: number;
+  onToggle: () => void;
+}) {
+  const Icon = expanded ? ChevronUpIcon : ChevronDownIcon;
+  return (
+    <ThreadDetailsControl
+      variant="ghost"
+      size="sm"
+      aria-expanded={expanded}
+      onClick={onToggle}
+      tone="muted"
+      className="w-full active:scale-100"
+    >
+      <Icon aria-hidden className="size-4 shrink-0" />
+      {expanded ? (
+        <T>Show less</T>
+      ) : (
+        <T>
+          Show <Var>{remaining}</Var> more
+        </T>
+      )}
+    </ThreadDetailsControl>
+  );
+}

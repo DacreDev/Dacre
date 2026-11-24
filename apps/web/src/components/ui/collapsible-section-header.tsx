@@ -1,0 +1,59 @@
+import type { ComponentProps, ReactNode } from "react";
+import { ChevronDownIcon } from "lucide-react";
+import { cn } from "../../lib/utils";
+
+const tones = {
+  shelf: { label: "text-(--sidebar-shelf-foreground)", line: "bg-sidebar-border" },
+  muted: { label: "text-dim-foreground", line: "bg-sidebar-border" },
+  settled: { label: "text-(--sidebar-settled-label)", line: "bg-sidebar-border" },
+  info: { label: "text-info-foreground", line: "bg-info/20 dark:bg-info/15" },
+  emphasized: { label: "text-sidebar-foreground/80", line: "bg-sidebar-foreground/25" },
+  accent: { label: "text-primary", line: "bg-primary/50" },
+} as const;
+
+export function CollapsibleSectionHeader({
+  children,
+  expanded,
+  tone = "muted",
+  variant = "default",
+  accessory,
+  ...buttonProps
+}: Omit<ComponentProps<"button">, "className" | "style" | "aria-expanded"> & {
+  expanded?: boolean | undefined;
+  tone?: keyof typeof tones;
+  variant?: "default" | "panel";
+  accessory?: ReactNode;
+}) {
+  return (
+    <button
+      {...buttonProps}
+      type="button"
+      aria-expanded={expanded}
+      className={cn(
+        "flex h-8 w-full cursor-pointer items-center disabled:cursor-default gap-2 rounded-md text-left text-meta focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70",
+        variant === "panel" ? "ps-2 pe-2.5" : "px-2",
+        tones[tone].label,
+      )}
+    >
+      <span className="min-w-0 truncate">{children}</span>
+      <span
+        aria-hidden
+        // A header with a trailing count drops its rule so it doesn't read as a leader.
+        className={cn("h-px min-w-2 flex-1", tones[tone].line, accessory && "invisible")}
+      />
+      {accessory}
+      {expanded === undefined ? null : (
+        <ChevronDownIcon
+          aria-hidden
+          className={cn("size-3 shrink-0 transition-transform", !expanded && "-rotate-90")}
+        />
+      )}
+    </button>
+  );
+}
+
+export function SectionHeaderStatus({ children }: { children: ReactNode }) {
+  return (
+    <span className="shrink-0 text-micro leading-none text-destructive-foreground">{children}</span>
+  );
+}

@@ -1,0 +1,583 @@
+import {
+  DEFAULT_SERVER_SETTINGS,
+  PROJECT_FILE_BACKED_SETTINGS,
+  type ProjectFileBackedSettingKey,
+  resolveEnvironmentMachineKind,
+  type ServerSettings,
+  type WorktreeSubmodules,
+} from "@dacre/contracts";
+import { ArrowUpRightIcon, ChevronRightIcon, FolderGit2Icon, LayersIcon } from "lucide-react";
+import { createContext, type ReactNode } from "react";
+import * as Equal from "effect/Equal";
+import { msg, T, useGT, useMessages } from "gt-react";
+
+import { m, type MessageResolver } from "../../i18n/messages";
+import { cn } from "../../lib/utils";
+import type { EnvironmentPresentation } from "../../state/environments";
+import { EnvironmentMachineIcon } from "../EnvironmentMachineIcon";
+import { resolveEnvModeLabel, WORKTREE_SUBMODULES_LABELS } from "../BranchToolbar.logic";
+import { runtimeModeConfig } from "../chat/runtimeModeConfig";
+import { PULL_REQUEST_MERGE_METHOD_LABELS } from "../pullRequest/pullRequestDetail.logic";
+import { Badge } from "../ui/badge";
+import { Button, ContentButton, InlineButton } from "../ui/button";
+import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
+import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { useOptionalSettingsScope } from "./SettingsScopeContext";
+import type { ProjectOverrideEntry, ScopedSettingsTarget } from "./scopedSettings";
+import { isProjectScopedSettingKey } from "./scopedSettings";
+import { settingsScopeEnvironmentLabels } from "./settingsScopeAxis";
+
+interface InheritanceLayer {
+  readonly key: "project" | "environment" | "dacre.json" | "built-in";
+  readonly label: string;
+  readonly value: string;
+  readonly effective: boolean;
+  readonly set: boolean;
+}
+
+const WRITING_STYLE_LABELS: Record<string, string> = {
+  repo_conventions: msg("Repository conventions"),
+  conventional_commits: msg("Conventional Commits"),
+  custom: msg("Custom instructions"),
+};
+
+const BACKGROUND_ACTIVITY_PROFILE_LABELS: Record<string, string> = {
+  balanced: msg("Balanced"),
+  performance: msg("Performance"),
+  "battery-saver": msg("Battery saver"),
+  custom: msg("Advanced", { $context: "background activity power profile" }),
+};
+
+function formatValue(
+  key: keyof ServerSettings,
+  value: unknown,
+  resolve: MessageResolver = m,
+): string {
+  if (value === null || value === undefined) {
+    return key === "pullRequestMergeMethod"
+      ? resolve(msg("Last selected"))
+      : key === "sidebarAutoSettleAfterDays"
+        ? resolve(msg("Never"))
+        : key === "defaultModelSelection"
+          ? resolve(msg("Automatic"))
+          : key === "sourceControlWriterModelSelection"
+            ? resolve(msg("Text generation model"))
+            : key === "reviewGuideModelSelection"
+              ? resolve(msg("Source control writer model"))
+              : key === "defaultThreadEnvMode" || key === "worktreeSubmodules"
+                ? resolve(msg("Inherit"))
+                : resolve(msg("Not set"));
+  }
+  if (typeof value === "boolean") {
+    return value
+      ? resolve(msg("On", { $context: "setting value" }))
+      : resolve(msg("Off", { $context: "setting value" }));
+  }
+  if (typeof value === "number") {
+    return key === "sidebarAutoSettleAfterDays"
+      ? resolve(msg("{count, plural, one {{count} day} other {{count} days}}", { count: value }))
+      : String(value);
+  }
+  if (typeof value === "string") {
+    if (key === "defaultThreadEnvMode" && (value === "local" || value === "worktree")) {
+      return resolveEnvModeLabel(value, resolve);
+    }
+    if (key === "defaultRuntimeMode" && value in runtimeModeConfig) {
+      return runtimeModeConfig[value as keyof typeof runtimeModeConfig].label;
+    }
+    if (key === "worktreeSubmodules" && value in WORKTREE_SUBMODULES_LABELS) {
+      return resolve(WORKTREE_SUBMODULES_LABELS[value as WorktreeSubmodules]);
+    }
+    if (key === "pullRequestMergeMethod" && value in PULL_REQUEST_MERGE_METHOD_LABELS) {
+      return resolve(
+        PULL_REQUEST_MERGE_METHOD_LABELS[value as keyof typeof PULL_REQUEST_MERGE_METHOD_LABELS],
+      );
+    }
+    return value === "" ? resolve(msg("Empty")) : value;
+  }
+  if (Array.isArray(value)) {
+    return resolve(
+      msg("{count, plural, one {{count} item} other {{count} items}}", { count: value.length }),
+    );
+  }
+  if (typeof value === "object") {
+    if (key === "backgroundActivity" && "profile" in value && typeof value.profile === "string") {
+      const label = BACKGROUND_ACTIVITY_PROFILE_LABELS[value.profile];
+      return label ? resolve(label) : value.profile;
+    }
+    if ("model" in value && typeof value.model === "string") return value.model;
+    if ("mode" in value && typeof value.mode === "string") {
+      if (key === "worktreeCleanup") {
+        return value.mode === "off"
+          ? resolve(msg("Off", { $context: "setting value" }))
+          : resolve(msg("Custom", { $context: "setting value" }));
+      }
+      return key === "sourceControlWritingStyle"
+        ? (() => {
+            const label = WRITING_STYLE_LABELS[value.mode];
+            return label ? resolve(label) : value.mode;
+          })()
+        : value.mode;
+    }
+  }
+  return resolve(msg("Custom", { $context: "setting value" }));
+}
+
+/** Matches resolveProjectSettings order. */
+export function settingInheritanceLayers(
+  target: ScopedSettingsTarget,
+  environmentSettings: ServerSettings,
+  key: keyof ServerSettings,
+  resolve: MessageResolver = m,
+): readonly InheritanceLayer[] {
+  const environmentValue = environmentSettings[key];
+  const source = isProjectScopedSettingKey(key) ? target.sources[key] : "environment";
+  const environmentSet = !Equal.equals(environmentValue, DEFAULT_SERVER_SETTINGS[key]);
+  const fileBacked = isProjectFileBackedSettingKey(key);
+  const layers: InheritanceLayer[] = [];
+  if (target.projectId !== null && isProjectScopedSettingKey(key)) {
+    layers.push({
+      key: "project",
+      label: resolve(msg("Project")),
+      value:
+        source === "project"
+          ? formatValue(key, target.settings[key], resolve)
+          : resolve(msg("Inherits")),
+      effective: source === "project",
+      set: source === "project",
+    });
+  }
+  layers.push({
+    key: "environment",
+    label: target.label,
+    value: environmentSet ? formatValue(key, environmentValue, resolve) : resolve(msg("Inherits")),
+    effective: source === "environment" && environmentSet,
+    set: environmentSet,
+  });
+  if (fileBacked && target.projectId !== null) {
+    layers.push({
+      key: "dacre.json",
+      label: "dacre.json",
+      value:
+        source === "dacre.json"
+          ? formatValue(key, target.settings[key], resolve)
+          : resolve(msg("Inherits")),
+      effective: source === "dacre.json",
+      set: source === "dacre.json",
+    });
+  }
+  // File-backed defaults come from the resolver, not the schema's decoded null.
+  const builtIn = fileBacked
+    ? PROJECT_FILE_BACKED_SETTINGS[key].builtIn
+    : DEFAULT_SERVER_SETTINGS[key];
+  layers.push({
+    key: "built-in",
+    label: resolve(msg("Default", { $context: "built-in default value" })),
+    value: formatValue(key, builtIn, resolve),
+    effective: source === "environment" && !environmentSet,
+    set: true,
+  });
+  return layers;
+}
+
+function isProjectFileBackedSettingKey(
+  key: keyof ServerSettings,
+): key is ProjectFileBackedSettingKey {
+  return Object.hasOwn(PROJECT_FILE_BACKED_SETTINGS, key);
+}
+
+export type SettingInheritanceState =
+  | "default"
+  | "environment"
+  | "inherited"
+  | "overridden"
+  | "mixed";
+
+export interface SettingOverridingProject extends ProjectOverrideEntry {
+  readonly label: string;
+  readonly open: () => void;
+}
+
+/** Popover footers render reset buttons as labeled actions instead of inline arrows. */
+export const SettingResetPlacementContext = createContext<"inline" | "popover">("inline");
+
+/** "2 project overrides" beside a row title at an environment scope. */
+export function SettingOverrideCount({ count }: { count: number }) {
+  const gt = useGT();
+  if (count === 0) return null;
+  return (
+    <Badge variant="secondary">
+      {gt("{count, plural, one {{count} project override} other {{count} project overrides}}", {
+        count,
+      })}
+    </Badge>
+  );
+}
+
+/**
+ * narrowing to a project does not add a caption line to every row. The
+ * popover owns the row's reset actions: `footer` holds the row's own reset
+ * (to default, or to the inherited value at a project scope), and clearing
+ * project overrides sits next to it at an environment scope.
+ */
+export function SettingInheritance({
+  state,
+  summary,
+  targets,
+  environments,
+  keys,
+  projectLabel,
+  overridingProjects = [],
+  onClearOverrides,
+  footer,
+}: {
+  state: SettingInheritanceState;
+  summary: string;
+  targets: readonly ScopedSettingsTarget[];
+  environments: readonly Pick<
+    EnvironmentPresentation,
+    "environmentId" | "label" | "displayUrl" | "serverConfig"
+  >[];
+  keys: readonly (keyof ServerSettings)[];
+  /** The selected project's name, shown for its own layer at a project scope. */
+  projectLabel?: string;
+  overridingProjects?: readonly SettingOverridingProject[];
+  onClearOverrides?: (entries: readonly ProjectOverrideEntry[]) => void;
+  footer?: ReactNode;
+}) {
+  const messages = useMessages();
+  const gt = useGT();
+  const scopeContext = useOptionalSettingsScope();
+  const key = keys[0];
+  if (!key || targets.length === 0) return null;
+  const hasMultipleEnvironments = new Set(targets.map((target) => target.environmentId)).size > 1;
+  const overrideCount =
+    overridingProjects.length > 0
+      ? gt("{count, plural, one {{count} project override} other {{count} project overrides}}", {
+          count: overridingProjects.length,
+        })
+      : null;
+  const chains = targets.flatMap((target) => {
+    const environment = environments.find(
+      (candidate) => candidate.environmentId === target.environmentId,
+    );
+    if (!environment?.serverConfig) return [];
+    const labels = settingsScopeEnvironmentLabels(environment, environments);
+    const path = scopeContext?.scope.members.find(
+      (member) => member.environmentId === target.environmentId && member.id === target.projectId,
+    )?.workspaceRoot;
+    const secondary = [
+      path?.split(/[\\/]/).filter(Boolean).slice(-2).join("/"),
+      labels.secondary,
+    ].filter(Boolean);
+    const layers = settingInheritanceLayers(
+      target,
+      environment.serverConfig.settings,
+      key,
+      messages,
+    );
+    const winningLayer = layers.find((layer) => layer.effective);
+    return [
+      {
+        id: `${target.environmentId}:${target.projectId ?? ""}`,
+        target,
+        label: labels.primary,
+        secondary,
+        machineLabel: labels.primary,
+        machineDetail: labels.secondary,
+        overrides: environment.serverConfig.settings.projectSettingsOverrides,
+        machine: resolveEnvironmentMachineKind(environment.serverConfig),
+        layers,
+        winningLayer,
+        resolution: {
+          winner: winningLayer?.key,
+          layers: layers.map(({ key, value }) => [key, value]),
+          settings: keys.map((settingKey) => target.settings[settingKey]),
+        },
+      },
+    ];
+  });
+  const overrideValue = (project: SettingOverridingProject) => {
+    if (!isProjectScopedSettingKey(key)) return null;
+    const overrides = environments.find(
+      (environment) => environment.environmentId === project.environmentId,
+    )?.serverConfig?.settings.projectSettingsOverrides;
+    return formatValue(key, overrides?.[project.projectId]?.[key], messages);
+  };
+  const clearOverrides =
+    onClearOverrides && overridingProjects.length > 0 ? (
+      <Button size="xs" variant="secondary" onClick={() => onClearOverrides(overridingProjects)}>
+        <T>Clear project overrides</T>
+      </Button>
+    ) : null;
+  const hasFooter = clearOverrides !== null || footer !== undefined;
+  const foldOverrides = hasMultipleEnvironments && overridingProjects.length > 3;
+  const primary =
+    chains.find(
+      ({ target }) =>
+        target.environmentId === scopeContext?.target?.environmentId &&
+        target.projectId === scopeContext?.target?.projectId,
+    ) ?? chains[0];
+  const machineLabelFor = (environmentId: string) => {
+    const chain = chains.find((entry) => entry.target.environmentId === environmentId);
+    return (
+      <>
+        <span className="block truncate">{chain?.machineLabel}</span>
+        {chain?.machineDetail ? (
+          <span className="block truncate">{chain.machineDetail}</span>
+        ) : null}
+      </>
+    );
+  };
+  const groups: (typeof chains)[] = [];
+  for (const chain of hasMultipleEnvironments && primary
+    ? [primary, ...chains.filter((entry) => entry !== primary)]
+    : chains) {
+    const group =
+      hasMultipleEnvironments &&
+      groups.find(([first]) => first && Equal.equals(first.resolution, chain.resolution));
+    if (group) group.push(chain);
+    else groups.push([chain]);
+  }
+  return (
+    <Popover>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <PopoverTrigger
+              render={
+                <Button
+                  size="icon-micro"
+                  variant="ghost-muted"
+                  aria-label={
+                    overrideCount
+                      ? gt("{summary}. {overrideCount}. Show where this value comes from", {
+                          summary,
+                          overrideCount,
+                        })
+                      : gt("{overrideSummary}. Show where this value comes from", {
+                          overrideSummary: summary,
+                        })
+                  }
+                />
+              }
+            />
+          }
+        >
+          <LayersIcon
+            className={cn(
+              "size-3",
+              state === "overridden" && "text-primary",
+              state === "mixed" && "text-warning",
+            )}
+          />
+        </TooltipTrigger>
+        <TooltipPopup side="top">
+          <span className="block">{summary}</span>
+          {overrideCount ? <span className="block">{overrideCount}</span> : null}
+        </TooltipPopup>
+      </Tooltip>
+      <PopoverPopup align="start" width="md" padding="none">
+        <div className="divide-y divide-divider">
+          {groups.map((members) => {
+            const first = members[0];
+            if (!first) return null;
+            const { id, target, machine, layers, winningLayer } = first;
+            const chain = (
+              <ol role="list" className="space-y-0.5 text-body">
+                {layers.map((layer) => (
+                  <li
+                    key={layer.key}
+                    className={cn(
+                      "flex h-6.5 items-center gap-2 rounded-row px-2",
+                      layer.effective && "bg-settings-effective-fill",
+                    )}
+                  >
+                    {/* The dot sits in the 13px slot of the override rows' folder icon, so
+                        dots and icons share a column and every label starts on one line. */}
+                    <span
+                      aria-hidden
+                      className="flex size-3.25 shrink-0 items-center justify-center"
+                    >
+                      <span
+                        className={cn(
+                          "size-1.5 rounded-full",
+                          layer.effective ? "bg-strong-foreground" : "bg-settings-inactive-dot",
+                        )}
+                      />
+                    </span>
+                    <span
+                      className={cn(
+                        "min-w-0 flex-1 truncate",
+                        layer.effective ? "text-foreground" : "text-muted-foreground",
+                      )}
+                    >
+                      {layer.key === "project" ? (projectLabel ?? layer.label) : layer.label}
+                    </span>
+                    <span
+                      className={cn(
+                        "max-w-40 shrink-0 truncate tabular-nums",
+                        layer.effective
+                          ? "font-medium text-foreground"
+                          : layer.set
+                            ? "text-muted-foreground"
+                            : "text-dim-foreground",
+                      )}
+                    >
+                      {layer.value}
+                    </span>
+                  </li>
+                ))}
+              </ol>
+            );
+            return (
+              <section key={id} className="space-y-1.5 px-3 py-2.5">
+                {!hasMultipleEnvironments ? (
+                  <h4 className="flex items-center gap-1.5 text-meta text-muted-foreground">
+                    <EnvironmentMachineIcon
+                      aria-hidden
+                      kind={machine}
+                      className="size-3.25 shrink-0"
+                    />
+                    <span className="min-w-0 truncate">{target.label}</span>
+                  </h4>
+                ) : null}
+                {hasMultipleEnvironments && groups.length > 1 ? (
+                  <Collapsible>
+                    <CollapsibleTrigger
+                      render={
+                        <Button
+                          variant="ghost"
+                          size="sm-multiline"
+                          className="w-full justify-start text-left"
+                        />
+                      }
+                    >
+                      <span className="flex w-full min-w-0 flex-col">
+                        <span className="flex min-w-0 items-center gap-2">
+                          <span className="min-w-0 flex-1 truncate text-body text-foreground tabular-nums">
+                            {winningLayer?.value}
+                          </span>
+                          <span className="text-caption text-muted-foreground">
+                            {winningLayer?.key === "environment"
+                              ? gt("Environment")
+                              : winningLayer?.label}
+                          </span>
+                          <ChevronRightIcon
+                            aria-hidden
+                            className="size-3 shrink-0 text-muted-foreground [[data-panel-open]_&]:rotate-90"
+                          />
+                        </span>
+                        <span className="flex min-w-0 flex-col gap-0.5 text-caption text-muted-foreground">
+                          {members.map((member) => (
+                            <span
+                              key={member.id}
+                              className="flex min-w-0 max-w-full items-center gap-1"
+                            >
+                              <EnvironmentMachineIcon
+                                aria-hidden
+                                kind={member.machine}
+                                className="size-3 shrink-0"
+                              />
+                              <span className="min-w-0">
+                                <span className="block truncate">{member.label}</span>
+                                {member.secondary.map((detail) => (
+                                  <span
+                                    key={detail}
+                                    className="block truncate text-meta text-muted-foreground"
+                                  >
+                                    {detail}
+                                  </span>
+                                ))}
+                              </span>
+                            </span>
+                          ))}
+                        </span>
+                      </span>
+                    </CollapsibleTrigger>
+                    <CollapsiblePanel>
+                      <div className="pt-1.5">{chain}</div>
+                    </CollapsiblePanel>
+                  </Collapsible>
+                ) : (
+                  <>
+                    {chain}
+                    {hasMultipleEnvironments ? (
+                      <p className="px-2 pt-1.5 text-caption text-muted-foreground">
+                        <T>Same on all machines</T>
+                      </p>
+                    ) : null}
+                  </>
+                )}
+              </section>
+            );
+          })}
+          {overridingProjects.length > 0 ? (
+            <section className="space-y-1 px-3 py-2.5">
+              <Collapsible key={foldOverrides ? "folded" : "expanded"} defaultOpen={!foldOverrides}>
+                <h4 className="text-meta text-muted-foreground">
+                  {foldOverrides ? (
+                    <CollapsibleTrigger render={<InlineButton tone="muted" />}>
+                      <ChevronRightIcon
+                        aria-hidden
+                        className="size-3 [[data-panel-open]_&]:rotate-90"
+                      />
+                      <T>Overridden by</T>
+                    </CollapsibleTrigger>
+                  ) : (
+                    <T>Overridden by</T>
+                  )}
+                </h4>
+                <CollapsiblePanel>
+                  <ul
+                    role="list"
+                    className={cn("text-body", foldOverrides && "max-h-48 overflow-y-auto")}
+                  >
+                    {overridingProjects.map((project) => (
+                      <li key={`${project.environmentId}:${project.projectId}`}>
+                        <ContentButton
+                          type="button"
+                          variant={hasMultipleEnvironments ? "inset-row-multiline" : "inset-row"}
+                          onClick={project.open}
+                        >
+                          <FolderGit2Icon
+                            aria-hidden
+                            className="size-3.25 shrink-0 text-muted-foreground"
+                          />
+                          <span className="min-w-0 flex-1 truncate text-foreground">
+                            <span className="block truncate">{project.label}</span>
+                            {hasMultipleEnvironments ? (
+                              <span className="block truncate text-meta text-muted-foreground">
+                                {machineLabelFor(project.environmentId)}
+                              </span>
+                            ) : null}
+                          </span>
+                          <span className="max-w-40 shrink-0 truncate text-muted-foreground tabular-nums">
+                            {overrideValue(project)}
+                          </span>
+                          <ArrowUpRightIcon
+                            aria-hidden
+                            className="size-3 shrink-0 text-dim-foreground"
+                          />
+                        </ContentButton>
+                      </li>
+                    ))}
+                  </ul>
+                </CollapsiblePanel>
+              </Collapsible>
+            </section>
+          ) : null}
+          {hasFooter ? (
+            <SettingResetPlacementContext value="popover">
+              <div className="flex items-center justify-end gap-2 px-3 py-2">
+                {clearOverrides}
+                {footer}
+              </div>
+            </SettingResetPlacementContext>
+          ) : null}
+        </div>
+      </PopoverPopup>
+    </Popover>
+  );
+}

@@ -1,0 +1,164 @@
+import { DEFAULT_CLIENT_SETTINGS, type ClientSettings } from "@dacre/contracts";
+import * as Context from "effect/Context";
+import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
+import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
+import * as Path from "effect/Path";
+import * as Ref from "effect/Ref";
+import * as Schema from "effect/Schema";
+
+import * as ElectronApp from "../electron/ElectronApp.ts";
+import * as DesktopClientSettings from "../settings/DesktopClientSettings.ts";
+import * as DesktopAssets from "./DesktopAssets.ts";
+import * as DesktopEnvironment from "./DesktopEnvironment.ts";
+import * as DesktopUserData from "./DesktopUserData.ts";
+
+const COMMIT_HASH_PATTERN = /^[0-9a-f]{7,40}$/i;
+const COMMIT_HASH_DISPLAY_LENGTH = 12;
+
+const AppPackageMetadata = Schema.Struct({
+  dacreCommitHash: Schema.optional(Schema.String),
+});
+const decodeAppPackageMetadata = Schema.decodeEffect(Schema.fromJsonString(AppPackageMetadata));
+
+export class DesktopAppIdentity extends Context.Service<
+  DesktopAppIdentity,
+  {
+    readonly resolveUserDataPath: Effect.Effect<
+      string,
+      DesktopUserData.DesktopUserDataInitializationError
+    >;
+    readonly configure: Effect.Effect<void>;
+    readonly applyAppIcon: (appIcon: string) => Effect.Effect<void>;
+  }
+>()("@dacre/desktop/app/DesktopAppIdentity") {}
+
+const normalizeCommitHash = (value: string): Option.Option<string> => {
+  const trimmed = value.trim();
+  return COMMIT_HASH_PATTERN.test(trimmed)
+    ? Option.some(trimmed.slice(0, COMMIT_HASH_DISPLAY_LENGTH).toLowerCase())
+    : Option.none();
+};
+
+/** @public */
+export const make = Effect.gen(function* () {
+  const assets = yield* DesktopAssets.DesktopAssets;
+  const electronApp = yield* ElectronApp.ElectronApp;
+  const environment = yield* DesktopEnvironment.DesktopEnvironment;
+  const fileSystem = yield* FileSystem.FileSystem;
+  const userDataContext = yield* Effect.context<FileSystem.FileSystem | Path.Path>();
+  const commitHashCache = yield* Ref.make<Option.Option<Option.Option<string>>>(Option.none());
+  const clientSettings = yield* DesktopClientSettings.DesktopClientSettings;
+  const customAppIconApplied = yield* Ref.make(false);
+
+  const resolveEmbeddedCommitHash = Effect.gen(function* () {
+    const packageJsonPath = environment.path.join(environment.appRoot, "package.json");
+    const raw = yield* fileSystem.readFileString(packageJsonPath).pipe(Effect.option);
+    return yield* Option.match(raw, {
+      onNone: () => Effect.succeed(Option.none<string>()),
+      onSome: (value) =>
+        decodeAppPackageMetadata(value).pipe(
+          Effect.map((parsed) =>
+            Option.fromNullishOr(parsed.dacreCommitHash).pipe(Option.flatMap(normalizeCommitHash)),
+          ),
+          Effect.orElseSucceed(() => Option.none<string>()),
+        ),
+    });
+  });
+
+  const resolveAboutCommitHash = Effect.gen(function* () {
+    const cached = yield* Ref.get(commitHashCache);
+    if (Option.isSome(cached)) {
+      return cached.value;
+    }
+
+    const override = Option.flatMap(environment.commitHashOverride, normalizeCommitHash);
+    if (Option.isSome(override)) {
+      yield* Ref.set(commitHashCache, Option.some(override));
+      return override;
+    }
+
+    if (!environment.isPackaged) {
+      const empty = Option.none<string>();
+      yield* Ref.set(commitHashCache, Option.some(empty));
+      return empty;
+    }
+
+    const commitHash = yield* resolveEmbeddedCommitHash;
+    yield* Ref.set(commitHashCache, Option.some(commitHash));
+    return commitHash;
+  });
+
+  const userDataPath = DesktopUserData.resolveUserDataPath(environment).pipe(
+    Effect.provide(userDataContext),
+  );
+
+  const applyAppIcon = Effect.fn("desktop.appIdentity.applyAppIcon")(function* (appIcon: string) {
+    const customIconPath = yield* assets.resolveAppIconPath(appIcon);
+    const replacedCustomIcon = yield* Ref.getAndSet(
+      customAppIconApplied,
+      Option.isSome(customIconPath),
+    );
+    if (Option.isSome(customIconPath)) {
+      yield* environment.platform === "darwin"
+        ? electronApp.setDockIcon(customIconPath.value)
+        : electronApp.setWindowIcons(customIconPath.value);
+      return;
+    }
+    const iconPaths = yield* assets.iconPaths;
+    if (environment.platform === "darwin") {
+      // Packaged bundles carry their icon in Info.plist; setting it again overwrites the user's custom icon.
+      if (!environment.isPackaged) {
+        yield* Option.match(iconPaths.png, {
+          onNone: () => Effect.void,
+          onSome: electronApp.setDockIcon,
+        });
+      } else if (replacedCustomIcon) {
+        yield* electronApp.setDockIcon(null);
+      }
+      return;
+    }
+    if (!replacedCustomIcon) return;
+    const defaultWindowIcon = environment.platform === "win32" ? iconPaths.ico : iconPaths.png;
+    yield* Option.match(defaultWindowIcon, {
+      onNone: () => Effect.void,
+      onSome: electronApp.setWindowIcons,
+    });
+  });
+
+  const configure = Effect.gen(function* () {
+    const commitHash = yield* resolveAboutCommitHash;
+    // Electron strips spaces but keeps parentheses in its User-Agent token, breaking Turnstile in preview sessions.
+    yield* electronApp.setName(
+      `${environment.branding.baseName} ${environment.branding.stageLabel}`,
+    );
+    yield* electronApp.setAboutPanelOptions({
+      applicationName: environment.displayName,
+      applicationVersion: environment.appVersion,
+      version: Option.getOrElse(commitHash, () => "unknown"),
+    });
+
+    if (environment.platform === "win32") {
+      yield* electronApp.setAppUserModelId(environment.appUserModelId);
+    }
+
+    const settings = yield* clientSettings.get.pipe(
+      Effect.orElseSucceed(() => Option.none<ClientSettings>()),
+    );
+    yield* applyAppIcon(
+      Option.match(settings, {
+        onNone: () => DEFAULT_CLIENT_SETTINGS.appIcon,
+        onSome: (value) => value.appIcon,
+      }),
+    );
+  }).pipe(Effect.withSpan("desktop.appIdentity.configure"));
+
+  return DesktopAppIdentity.of({
+    resolveUserDataPath: userDataPath,
+    configure,
+    applyAppIcon,
+  });
+});
+
+export const layer = Layer.effect(DesktopAppIdentity, make);

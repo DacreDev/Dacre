@@ -1,0 +1,76 @@
+import { pipe } from "effect/Function";
+import {
+  fileBasename,
+  stripSlashPrefixedWindowsDrive,
+  isHostPath,
+  isWindowsAbsolutePath,
+} from "@dacre/shared/path";
+import { formatFilePathPosition, splitFilePathPosition } from "@dacre/shared/fileLinks";
+
+function normalizePathSeparators(path: string): string {
+  return path.replaceAll("\\", "/");
+}
+
+function trimTrailingPathSeparators(path: string): string {
+  return path.replace(/[\\/]+$/, "");
+}
+
+function stripRelativePrefixes(path: string): string {
+  return path.replace(/^\.\/+/, "").replace(/^\/+/, "");
+}
+
+export function formatWorkspaceRelativeDetail(
+  detail: string | undefined,
+  workspaceRoot: string | undefined,
+): string | undefined {
+  if (!detail || !workspaceRoot) return detail;
+  const root = trimTrailingPathSeparators(workspaceRoot);
+  const label = fileBasename(normalizePathSeparators(root));
+  for (const prefix of new Set([root, normalizePathSeparators(root)])) {
+    const escaped = prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    detail = detail.replace(
+      new RegExp(`(^|[\\s"'\\x60(])${escaped}([/\\\\])`, "g"),
+      (_match, boundary: string, separator: string) => `${boundary}${label}${separator}`,
+    );
+  }
+  return detail;
+}
+
+export function formatWorkspaceRelativePath(
+  pathWithPosition: string,
+  workspaceRoot: string | undefined,
+): string {
+  const position = splitFilePathPosition(pathWithPosition);
+  const normalizedPath = stripSlashPrefixedWindowsDrive(normalizePathSeparators(position.path));
+
+  let displayPath = normalizedPath;
+  if (workspaceRoot) {
+    const normalizedWorkspaceRoot = pipe(
+      trimTrailingPathSeparators(workspaceRoot),
+      normalizePathSeparators,
+      stripSlashPrefixedWindowsDrive,
+    );
+    const workspaceLabel = fileBasename(normalizedWorkspaceRoot);
+    const caseInsensitive = isWindowsAbsolutePath(stripSlashPrefixedWindowsDrive(workspaceRoot));
+    const pathForCompare = caseInsensitive ? normalizedPath.toLowerCase() : normalizedPath;
+    const workspaceForCompare = caseInsensitive
+      ? normalizedWorkspaceRoot.toLowerCase()
+      : normalizedWorkspaceRoot;
+    const workspaceWithSeparator = `${workspaceForCompare}/`;
+    const workspaceLabelWithSeparator = `${caseInsensitive ? workspaceLabel.toLowerCase() : workspaceLabel}/`;
+
+    if (pathForCompare === workspaceForCompare) {
+      displayPath = workspaceLabel;
+    } else if (pathForCompare.startsWith(workspaceWithSeparator)) {
+      const relativeSuffix = normalizedPath.slice(normalizedWorkspaceRoot.length + 1);
+      displayPath = `${workspaceLabel}/${relativeSuffix}`;
+    } else if (!isHostPath(normalizedPath)) {
+      const relativePath = stripRelativePrefixes(normalizedPath);
+      displayPath = pathForCompare.startsWith(workspaceLabelWithSeparator)
+        ? normalizedPath
+        : `${workspaceLabel}/${relativePath}`;
+    }
+  }
+
+  return formatFilePathPosition({ ...position, path: displayPath });
+}

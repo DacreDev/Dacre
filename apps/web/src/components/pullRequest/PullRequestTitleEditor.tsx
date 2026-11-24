@@ -1,0 +1,166 @@
+import { squashAtomCommandFailure } from "@dacre/client-runtime/state/runtime";
+import type { EnvironmentId, PullRequestDetail, PullRequestRef } from "@dacre/contracts";
+import { msg, T, useGT } from "gt-react";
+import { useState } from "react";
+import { sourceControlClients } from "@dacre/client-runtime/source-control-clients";
+
+import { m } from "~/i18n/messages";
+import { pullRequestEnvironment } from "~/state/pullRequests";
+import { useAtomCommand } from "~/state/use-atom-command";
+import { Button } from "../ui/button";
+import { Input } from "../ui/input";
+import { toastManager } from "../ui/toast";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { PullRequestDetailTitleRow } from "./PullRequestDetailLayout";
+import { PullRequestEditButton } from "./PullRequestEditButton";
+import { readableFailure } from "./pullRequestDetail.logic";
+import { canEditPullRequestChangeRequest } from "@dacre/client-runtime/pull-request-editing";
+
+import { changeRequestTermKind } from "./changeRequestTerm";
+
+/** The pull request title, which the reader can rename in place when the host allows it. */
+export function PullRequestTitleEditor({
+  environmentId,
+  reference,
+  detail,
+  canWriteSourceControl,
+  value: titleDraft,
+  onValueChange,
+}: {
+  environmentId: EnvironmentId;
+  reference: PullRequestRef;
+  detail: PullRequestDetail;
+  canWriteSourceControl: boolean;
+  value: string | null;
+  onValueChange: (value: string | null) => void;
+}) {
+  const update = useAtomCommand(pullRequestEnvironment.update, { reportFailure: false });
+  const gt = useGT();
+  const [titleSaving, setTitleSaving] = useState(false);
+
+  const saveTitle = async (next: string) => {
+    const title = next.trim();
+    if (!canWriteSourceControl || titleSaving) return;
+    if (title.length === 0 || title === detail.title) {
+      onValueChange(null);
+      return;
+    }
+    setTitleSaving(true);
+    // The new title shows while the host takes it, so the editor closes at once.
+    onValueChange(null);
+    const result = await update({ environmentId, input: { ...reference, title } });
+    setTitleSaving(false);
+    if (result._tag === "Failure") {
+      onValueChange(title);
+      toastManager.add({
+        type: "error",
+        title: m(msg("The title could not be saved")),
+        description: readableFailure(
+          squashAtomCommandFailure(result),
+          m(msg("The host refused the new title.")),
+        ),
+      });
+    }
+  };
+
+  return (
+    <WorkItemTitleEditor
+      title={detail.title}
+      canEdit={canEditPullRequestChangeRequest(detail)}
+      draft={titleDraft}
+      onDraftChange={onValueChange}
+      saving={titleSaving}
+      canSave={canWriteSourceControl}
+      label={gt(
+        "{term, select, mr {Merge request} cr {Change request} other {Pull request}} title",
+        {
+          term: changeRequestTermKind(sourceControlClients.get(detail.provider).changeRequest),
+        },
+      )}
+      onSave={(next) => void saveTitle(next)}
+    />
+  );
+}
+
+/**
+ * A detail's title, shared by pull requests and issues: the heading with its edit button, or
+ * the field that renames it in place while `draft` holds text.
+ */
+export function WorkItemTitleEditor({
+  title,
+  canEdit,
+  draft,
+  onDraftChange,
+  saving,
+  canSave = true,
+  label,
+  onSave,
+}: {
+  title: string;
+  canEdit: boolean;
+  draft: string | null;
+  onDraftChange: (draft: string | null) => void;
+  saving: boolean;
+  canSave?: boolean;
+  label: string;
+  onSave: (draft: string) => void;
+}) {
+  const gt = useGT();
+  if (draft === null) {
+    return (
+      <PullRequestDetailTitleRow className="group gap-1">
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <h1 className="min-w-0 flex-1 text-title leading-(--pr-title-leading) [--pr-title-leading:1.3] wrap-anywhere text-foreground [--type-title:0.9375rem]">
+                {title}
+              </h1>
+            }
+          />
+          <TooltipPopup side="top">{title}</TooltipPopup>
+        </Tooltip>
+        {canEdit ? (
+          <PullRequestEditButton
+            aria-label={gt("Edit title")}
+            onClick={() => onDraftChange(title)}
+          />
+        ) : null}
+      </PullRequestDetailTitleRow>
+    );
+  }
+  return (
+    <div className="space-y-2">
+      <Input
+        autoFocus
+        size="sm"
+        disabled={saving}
+        value={draft}
+        aria-label={label}
+        onChange={(event) => onDraftChange(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+          if (event.key === "Enter") {
+            event.preventDefault();
+            onSave(draft);
+          } else if (event.key === "Escape") {
+            event.preventDefault();
+            onDraftChange(null);
+          }
+        }}
+      />
+      <div className="flex justify-end gap-2">
+        <Button size="xs" variant="ghost" disabled={saving} onClick={() => onDraftChange(null)}>
+          <T>Cancel</T>
+        </Button>
+        <Button
+          size="xs"
+          variant="secondary"
+          disabled={!canSave || saving || draft.trim().length === 0}
+          onClick={() => onSave(draft)}
+        >
+          {saving ? gt("Saving...") : gt("Save")}
+        </Button>
+      </div>
+    </div>
+  );
+}

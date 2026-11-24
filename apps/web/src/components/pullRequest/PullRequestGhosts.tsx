@@ -1,0 +1,478 @@
+import type { PullRequestListEntry, PullRequestSummary, ScopedThreadRef } from "@dacre/contracts";
+import {
+  ArrowLeftIcon,
+  ChevronRightIcon,
+  EllipsisIcon,
+  ExternalLinkIcon,
+  FileDiffIcon,
+  PanelRightIcon,
+} from "lucide-react";
+import { msg, T, useGT, useMessages } from "gt-react";
+import type { ReactNode } from "react";
+import {
+  sourceControlClients,
+  type ChangeRequestTerminology,
+} from "@dacre/client-runtime/source-control-clients";
+
+import { useOpenLink } from "~/browser/useOpenLink";
+import { cn } from "~/lib/utils";
+import { RelativeTime } from "~/components/RelativeTime";
+
+import { PAGE_EMPTY_GHOST_OPACITY } from "../PageEmptyState";
+import { Button, InlineButton } from "../ui/button";
+import { Toggle, ToggleGroup } from "../ui/toggle-group";
+import { MiddleTruncate } from "../ui/middle-truncate";
+import {
+  PullRequestActorLabel,
+  PullRequestDiffStat,
+  pullRequestChecksStatePresentation,
+  resolvePullRequestState,
+} from "./pullRequestPresentation";
+import { resolveFilterOptions } from "./pullRequestListOptions";
+
+import { changeRequestTermKind } from "./changeRequestTerm";
+
+export function GhostBar({ className }: { className?: string | undefined }) {
+  return <div aria-hidden className={cn("h-3 rounded bg-muted-foreground/15", className)} />;
+}
+
+const TITLE_WIDTHS = ["w-3/5", "w-2/5", "w-1/2", "w-2/3", "w-2/5", "w-3/5", "w-1/2"];
+const META_WIDTHS = ["w-2/5", "w-1/3", "w-2/5", "w-1/4", "w-1/3", "w-2/5", "w-1/3"];
+const DEFAULT_DETAIL_TABS = [
+  { value: "summary", label: msg("Summary", { $context: "pull request tab" }) },
+  { value: "timeline", label: msg("Timeline", { $context: "pull request tab" }) },
+  { value: "code", label: msg("Code", { $context: "pull request tab" }) },
+] as const;
+
+export function PullRequestListGhost({
+  rows = 7,
+  caption,
+  idle = false,
+}: {
+  rows?: number;
+  caption?: string;
+  /**
+   * The list's shape under an empty page rather than a load: still, silent, and fading out
+   * toward the title so it never reads as rows on their way.
+   */
+  idle?: boolean;
+}) {
+  const gt = useGT();
+  return (
+    <div
+      {...(idle
+        ? { "aria-hidden": true }
+        : { role: "status", "aria-label": caption ?? gt("Loading pull requests") })}
+      className="space-y-px"
+    >
+      {caption ? (
+        <p className="ps-10 pe-3 pb-1 text-meta text-muted-foreground/70">{caption}</p>
+      ) : null}
+      {/* A row's own lines: glyph on the title line, title and meta 20 and 16 tall with the
+          diff stat and time at their ends, 61px rows with the list's 1px separators. */}
+      <div className={cn("space-y-px", !idle && "motion-safe:animate-skeleton")}>
+        {Array.from({ length: rows }, (_, index) => (
+          <div
+            key={index}
+            className={cn(
+              "flex items-start gap-3 rounded-lg px-3 py-2.5",
+              idle && (PAGE_EMPTY_GHOST_OPACITY[index] ?? "opacity-25"),
+            )}
+          >
+            <GhostBar className="mt-0.5 size-4 shrink-0 rounded-full" />
+            <div className="flex min-w-0 flex-1 flex-col gap-1.25">
+              <div className="flex h-5 items-center gap-2">
+                <GhostBar className={cn("h-4", TITLE_WIDTHS[index % TITLE_WIDTHS.length])} />
+                <GhostBar className="ml-auto w-12 shrink-0" />
+              </div>
+              <div className="flex h-4 items-center gap-2">
+                <GhostBar className={cn("h-3.5", META_WIDTHS[index % META_WIDTHS.length])} />
+                <GhostBar className="ml-auto w-16 shrink-0" />
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The detail panel's two-row header shape. Keeping the chrome, summary facts, and description
+ */
+export function PullRequestDetailGhost({
+  seed: entry,
+  summary,
+  actions,
+  tabs: requestedTabs,
+  activeTab,
+  number,
+  onBack,
+  onClose,
+  threadRef = null,
+}: {
+  seed?: PullRequestListEntry | null;
+  summary?: PullRequestSummary | null;
+  actions?: ReactNode;
+  tabs?: ReadonlyArray<{ value: string; label: string }>;
+  activeTab?: string;
+  number?: number;
+  onBack?: (() => void) | undefined;
+  onClose?: (() => void) | undefined;
+  threadRef?: ScopedThreadRef | null | undefined;
+}) {
+  const gt = useGT();
+  const resolve = useMessages();
+  const openLink = useOpenLink(threadRef);
+  const tabs = requestedTabs ?? resolveFilterOptions(DEFAULT_DETAIL_TABS, resolve);
+  const seed = summary
+    ? {
+        ...entry,
+        ...summary,
+        isDraft: summary.isDraft ?? entry?.isDraft,
+      }
+    : entry;
+  const terminology = sourceControlClients.get(seed?.provider).changeRequest;
+  const statePresentation = seed
+    ? resolvePullRequestState(
+        {
+          state: seed.state,
+          isDraft: seed.isDraft ?? false,
+        },
+        resolve,
+      )
+    : null;
+  // Passing list rollups can omit workflows awaiting approval; wait for detail.
+  const checksPresentation =
+    seed?.checksState === "failing" || seed?.checksState === "pending"
+      ? pullRequestChecksStatePresentation(seed.checksState, resolve)
+      : null;
+  const changedFiles = summary?.changedFiles ?? null;
+  const selectedTab =
+    tabs.find((item) => item.value === activeTab)?.value ?? tabs[0]?.value ?? "summary";
+
+  return (
+    <div
+      role="status"
+      aria-label={gt(
+        "Loading {term, select, mr {merge request} cr {change request} other {pull request}}",
+        { term: changeRequestTermKind(terminology) },
+      )}
+      className={cn(
+        "flex h-[calc(100%+var(--surface-top-inset,0px))] min-h-0 flex-col overflow-hidden bg-(--code-surface) pt-under-header",
+        !seed && "motion-safe:animate-skeleton",
+      )}
+      data-surface-reaches-under-header=""
+    >
+      <div className="@container/pr-header grid min-w-0 shrink-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-x-2 border-b border-border">
+        <div className="mt-3 grid h-8 min-w-0 items-center overflow-hidden pl-4">
+          <div className="flex min-w-0 items-center gap-1.5 text-meta text-muted-foreground">
+            {onBack ? (
+              <Button
+                size="icon-xs"
+                variant="ghost-muted"
+                className="-ms-1.25"
+                onClick={onBack}
+                aria-label={gt(
+                  "Back to this thread's {term, select, mr {merge requests} cr {change requests} other {pull requests}}",
+                  { term: changeRequestTermKind(terminology) },
+                )}
+              >
+                <ArrowLeftIcon aria-hidden className="size-3.5" />
+              </Button>
+            ) : null}
+            {seed ? (
+              <>
+                <InlineButton
+                  onClick={(event) => void openLink(seed.url, { event }).catch(console.error)}
+                  onAuxClick={(event) => {
+                    if (event.button === 1) void openLink(seed.url, { event }).catch(console.error);
+                  }}
+                  aria-label={gt(
+                    "Open {term, select, mr {merge request} cr {change request} other {pull request}} #{number} on host",
+                    {
+                      term: changeRequestTermKind(terminology),
+                      number: seed.number,
+                    },
+                  )}
+                >
+                  <span className={statePresentation?.toneClassName}>#{seed.number}</span>
+                  <ExternalLinkIcon aria-hidden className="size-2.5" />
+                </InlineButton>
+                <span className="min-w-0 truncate text-label text-foreground">{seed.title}</span>
+              </>
+            ) : (
+              <>
+                <span className="shrink-0">#{number ?? "…"}</span>
+                <GhostBar className="h-4 w-3/5" />
+              </>
+            )}
+          </div>
+        </div>
+        <div className="mt-3 mr-3 flex h-8 shrink-0 items-center justify-end gap-1">
+          {actions}
+          <Button
+            size="icon-xs"
+            variant="ghost"
+            disabled
+            aria-label={gt(
+              "{term, select, mr {Merge request} cr {Change request} other {Pull request}} actions loading",
+              {
+                term: changeRequestTermKind(terminology),
+              },
+            )}
+          >
+            <EllipsisIcon aria-hidden className="size-4" />
+          </Button>
+          {onClose ? (
+            <Button
+              size="icon-xs"
+              variant="ghost"
+              aria-label={gt(
+                "Collapse {term, select, mr {merge request} cr {change request} other {pull request}} panel",
+                { term: changeRequestTermKind(terminology) },
+              )}
+              onClick={onClose}
+            >
+              <PanelRightIcon aria-hidden className="size-3.5" />
+            </Button>
+          ) : null}
+        </div>
+
+        <div className="col-span-2 min-w-0 px-4 pt-1 pb-2">
+          <div className="flex min-h-8 min-w-0 items-center gap-1.5 text-meta text-muted-foreground">
+            {seed ? (
+              <span className="flex min-w-0 shrink items-center gap-1.5 overflow-hidden">
+                <PullRequestActorLabel
+                  actor={seed.author ?? null}
+                  tooltip={false}
+                  className="min-w-0 max-w-28"
+                />
+                <span className="shrink-0 font-normal">
+                  <RelativeTime timestamp={seed.updatedAt} />
+                </span>
+              </span>
+            ) : (
+              <span className="flex items-center gap-1.5">
+                <GhostBar className="size-4 rounded-full" />
+                <GhostBar className="h-3 w-24" />
+              </span>
+            )}
+            <span aria-hidden className="h-3 w-px shrink-0 bg-border/70" />
+            <span className="flex min-w-0 flex-1 items-center gap-1.5 font-mono text-caption font-normal text-dim-foreground">
+              {seed ? (
+                <>
+                  <code className="flex min-w-0 max-w-[40%] shrink-0 @max-sm/pr-header:hidden">
+                    <MiddleTruncate value={seed.baseBranch} />
+                  </code>
+                  <ArrowLeftIcon
+                    aria-label={gt("receives changes from", {
+                      $context:
+                        "screen reader label for an arrow between the base branch, read before it, and the head branch, read after it",
+                    })}
+                    className="size-3 shrink-0 @max-sm/pr-header:hidden"
+                  />
+                  <code className="min-w-0 truncate rounded-kbd bg-secondary px-1.5 py-px text-muted-foreground">
+                    {seed.headBranch}
+                  </code>
+                </>
+              ) : (
+                <GhostBar className="h-3 w-32" />
+              )}
+            </span>
+            <span className="ml-auto inline-flex shrink-0 items-center justify-end gap-1.5 pl-1.5 text-caption font-normal">
+              <span className="inline-flex items-center gap-1 tabular-nums">
+                <FileDiffIcon aria-hidden className="size-3" />
+                {changedFiles === null ? (
+                  <GhostBar className="h-3 w-4" />
+                ) : (
+                  changedFiles.toLocaleString()
+                )}
+              </span>
+              {seed ? (
+                <PullRequestDiffStat
+                  additions={seed.additions ?? 0}
+                  deletions={seed.deletions ?? 0}
+                  className="shrink-0 font-mono text-caption"
+                />
+              ) : (
+                <GhostBar className="h-3 w-16" />
+              )}
+            </span>
+          </div>
+        </div>
+
+        <nav
+          className="col-span-2 flex min-h-12 min-w-0 flex-wrap items-center gap-x-3 gap-y-2 px-4 py-2"
+          aria-label={gt(
+            "{term, select, mr {Merge request} cr {Change request} other {Pull request}} tabs",
+            { term: changeRequestTermKind(terminology) },
+          )}
+          inert
+        >
+          <ToggleGroup
+            className="shrink-0"
+            size="segmented"
+            variant="default"
+            value={[selectedTab]}
+          >
+            {tabs.map((tab) => (
+              <Toggle key={tab.value} value={tab.value} tabIndex={-1}>
+                {tab.label}
+              </Toggle>
+            ))}
+          </ToggleGroup>
+        </nav>
+      </div>
+
+      <div
+        tabIndex={-1}
+        data-workspace-focus-default
+        className="min-h-0 flex-1 overflow-hidden outline-none"
+      >
+        {/* The readiness card's geometry: checks, reviews and conflicts rows over the merge. */}
+        <section className="px-4 pt-3 pb-4">
+          <div className="overflow-hidden rounded-card border border-border surface-card">
+            <div className="divide-y divide-border">
+              {["w-36", "w-32", "w-40"].map((width, index) => (
+                // The divider sits outside the 40px row, as on the loaded collapsible rows.
+                <div key={width}>
+                  <div className="flex min-h-10 items-center gap-2.5 px-3 text-meta">
+                    {index === 0 && checksPresentation ? (
+                      <>
+                        <checksPresentation.Icon
+                          aria-hidden
+                          className={cn("size-3.5 shrink-0", checksPresentation.toneClassName)}
+                        />
+                        <span className="min-w-0 flex-1 truncate font-medium text-foreground">
+                          {checksPresentation.label}
+                        </span>
+                      </>
+                    ) : (
+                      <>
+                        <GhostBar className="size-3.5 shrink-0 rounded-full" />
+                        <span className="min-w-0 flex-1">
+                          <GhostBar className={cn("h-3", width)} />
+                        </span>
+                      </>
+                    )}
+                    <GhostBar className="h-3 w-16 shrink-0" />
+                    <ChevronRightIcon
+                      aria-hidden
+                      className="size-3.5 shrink-0 text-dim-foreground"
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="border-t border-border p-3">
+              <GhostBar className="h-8 w-full rounded-md sm:h-7" />
+            </div>
+          </div>
+        </section>
+
+        <section>
+          <div className="sticky top-0 z-10 flex w-full items-center bg-(--code-surface) pr-4">
+            <div className="flex min-w-0 flex-1 items-center gap-1.5 px-4 py-3 text-left text-label text-foreground">
+              <span>
+                <T>Description</T>
+              </span>
+              <ChevronRightIcon
+                aria-hidden
+                className="size-3.5 rotate-90 text-muted-foreground/60"
+              />
+            </div>
+          </div>
+          <div className="space-y-3 px-4 pb-4">
+            <GhostBar className="h-5 w-40" />
+            <div className="space-y-2">
+              <GhostBar className="h-4 w-full" />
+              <GhostBar className="h-4 w-11/12" />
+              <GhostBar className="h-4 w-4/5" />
+              <GhostBar className="h-4 w-2/3" />
+            </div>
+            {/* The labels line. */}
+            <div className="-mt-1 flex h-6 items-center">
+              <GhostBar className="w-20" />
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>
+  );
+}
+
+export function PullRequestPeopleGhost({ rows = 4 }: { rows?: number }) {
+  const gt = useGT();
+  return (
+    <div
+      role="status"
+      aria-label={gt("Loading people")}
+      className="motion-safe:animate-skeleton space-y-1 p-1"
+    >
+      {Array.from({ length: rows }, (_, index) => (
+        <div key={index} className="flex h-7 items-center gap-2 rounded-md px-2">
+          <GhostBar className="size-4 rounded-full" />
+          <GhostBar className={META_WIDTHS[index % META_WIDTHS.length]} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+export function PullRequestTimelineGhost({ rows = 6 }: { rows?: number }) {
+  const gt = useGT();
+  return (
+    <div
+      role="status"
+      aria-label={gt("Loading timeline")}
+      className="motion-safe:animate-skeleton px-4 py-4"
+    >
+      {/* The timeline's own lines: the rail at 11.5px, dots centered on its 24px markers,
+          text from 34px, one 34px row per entry with its date at the end. */}
+      <div className="relative mx-auto max-w-3xl">
+        <span aria-hidden className="absolute top-2 bottom-5 left-[11.5px] w-px bg-border/70" />
+        {Array.from({ length: rows }, (_, index) => (
+          <div key={index} className="relative pb-2.5 pl-8.5">
+            <GhostBar className="absolute top-2 left-2 size-2 rounded-full" />
+            <div className="flex h-6 items-center gap-2">
+              <GhostBar className={cn("h-3.5", TITLE_WIDTHS[index % TITLE_WIDTHS.length])} />
+              <GhostBar className="ml-auto w-8 shrink-0" />
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export function PullRequestConversationGhost({
+  rows = 3,
+  terminology,
+}: {
+  rows?: number;
+  terminology: ChangeRequestTerminology;
+}) {
+  const gt = useGT();
+  return (
+    <div
+      role="status"
+      aria-label={gt(
+        "Loading {term, select, mr {merge request} cr {change request} other {pull request}} conversation",
+        { term: changeRequestTermKind(terminology) },
+      )}
+      className="motion-safe:animate-skeleton space-y-4 py-2"
+    >
+      {Array.from({ length: rows }, (_, index) => (
+        <div key={index} className="flex items-start gap-2">
+          <GhostBar className="size-5 shrink-0 rounded-full" />
+          <div className="flex-1 space-y-1.5">
+            <GhostBar className={META_WIDTHS[index % META_WIDTHS.length]} />
+            <GhostBar className="w-full" />
+            <GhostBar className="w-3/4" />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}

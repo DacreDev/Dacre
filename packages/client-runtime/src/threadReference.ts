@@ -1,0 +1,84 @@
+import type {
+  ComposerContextClipboardFragment,
+  ScopedThreadRef,
+  ThreadPullRequestLink,
+} from "@dacre/contracts";
+import { threadContextRecord } from "@dacre/shared/composerContextReferences";
+import { hostedThreadLink } from "@dacre/shared/threadLinks";
+
+import { resolveThreadCurrentPullRequestLink } from "./threadPullRequests.ts";
+import { mFallback, msg } from "gt-i18n";
+import type { MFunctionType } from "gt-i18n/types";
+
+export interface ThreadReferenceCopyTarget {
+  readonly kind: "pull-request" | "thread";
+  /** The plain text: a PR URL, or a link that opens the thread from anywhere. */
+  readonly value: string;
+  /** What a toast or palette row shows for the copy. */
+  readonly description: string;
+  /** Dacre's clipboard format, which pastes a thread back into a composer as a chip. */
+  readonly fragment?: ComposerContextClipboardFragment;
+  readonly clipboardTarget: string;
+  readonly successTitle: string;
+  readonly failureTitle: string;
+}
+
+/**
+ * A link that opens the thread from anywhere, through `hostedAppUrl`, this build's hosted app. It
+ * pastes back as a chip into any composer whose agent reads that thread's machine.
+ */
+export function threadChipCopyTarget(
+  threadRef: ScopedThreadRef,
+  title: string,
+  hostedAppUrl?: string,
+  resolve: MFunctionType = mFallback,
+): ThreadReferenceCopyTarget {
+  const record = threadContextRecord(threadRef, title);
+  return {
+    kind: "thread",
+    value: hostedThreadLink(threadRef, hostedAppUrl),
+    description: record.title,
+    fragment: { version: 1, source: { environmentId: threadRef.environmentId }, records: [record] },
+    clipboardTarget: "thread",
+    successTitle: resolve(msg("Thread copied")),
+    failureTitle: resolve(msg("Failed to copy thread")),
+  };
+}
+
+export function resolveThreadReferenceCopyTarget(
+  input: {
+    readonly threadRef: ScopedThreadRef;
+    readonly title: string;
+    /** Undefined means no PR panel; null means its URL is not available yet. */
+    readonly openPanelPullRequestUrl?: string | null | undefined;
+    readonly pullRequests?: ReadonlyArray<ThreadPullRequestLink> | undefined;
+    readonly linkedPullRequestUrl?: string | null;
+    readonly hostedAppUrl?: string;
+  },
+  resolve: MFunctionType = mFallback,
+): ThreadReferenceCopyTarget | null {
+  if (input.openPanelPullRequestUrl === null) return null;
+  const pullRequestUrl =
+    input.openPanelPullRequestUrl ??
+    resolveThreadCurrentPullRequestLink(input.pullRequests ?? [])?.url ??
+    input.linkedPullRequestUrl;
+  return pullRequestUrl
+    ? pullRequestCopyTarget(pullRequestUrl, "PR", resolve)
+    : threadChipCopyTarget(input.threadRef, input.title, input.hostedAppUrl, resolve);
+}
+
+/** `shortLabel` is the forge's name for it: "PR", or "MR" on GitLab. */
+export function pullRequestCopyTarget(
+  url: string,
+  shortLabel = "PR",
+  resolve: MFunctionType = mFallback,
+): ThreadReferenceCopyTarget {
+  return {
+    kind: "pull-request",
+    value: url,
+    description: url,
+    clipboardTarget: "pull request link",
+    successTitle: resolve(msg("{shortLabel} link copied", { shortLabel })),
+    failureTitle: resolve(msg("Failed to copy {shortLabel} link", { shortLabel })),
+  };
+}

@@ -1,0 +1,84 @@
+import { MessageId, ProjectId, ThreadId } from "@dacre/contracts";
+import { isMacPlatform } from "@dacre/shared/keybindings";
+import { type CxOptions, cx } from "class-variance-authority";
+import * as Hex from "effect/encoding/Hex";
+import { msg } from "gt-react";
+import { extendTailwindMerge } from "tailwind-merge";
+import { DraftId } from "../composerDraftStore";
+import { m, type MessageResolver } from "../i18n/messages";
+
+const twMerge = extendTailwindMerge({
+  extend: {
+    classGroups: { "bg-image": [{ bg: ["composer-seam-below", "composer-seam-above"] }] },
+    theme: {
+      radius: [
+        "model-tag",
+        "kbd",
+        "badge",
+        "row",
+        "item",
+        "control",
+        "card",
+        "row-card",
+        "pane",
+        "thread-details",
+        "project-icon",
+      ],
+      shadow: ["dialog", "composer"],
+      text: [
+        "2xs",
+        "3xs",
+        "4xs",
+        "5xs",
+        "title",
+        "prompt",
+        "control",
+        "label",
+        "body",
+        "meta",
+        "caption",
+        "micro",
+      ],
+    },
+  },
+});
+
+export function cn(...inputs: CxOptions) {
+  return twMerge(cx(inputs));
+}
+
+export { isMacPlatform };
+
+export function isWindowsPlatform(platform: string): boolean {
+  return /^win(dows)?/i.test(platform);
+}
+
+export function normalizeSearchText(value: string): string {
+  return value.normalize("NFKD").replace(/\p{M}/gu, "").toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+export function getLocalFileManagerName(platform: string, resolve: MessageResolver = m): string {
+  if (isMacPlatform(platform)) {
+    return "Finder";
+  }
+  if (isWindowsPlatform(platform)) {
+    return resolve(msg("File Explorer", { $context: "the Windows file manager app" }));
+  }
+  return resolve(msg("Files", { $context: "the Linux file manager app" }));
+}
+
+export function randomUUID(): string {
+  const bytes = globalThis.crypto.getRandomValues(new Uint8Array(16));
+  bytes[6] = (bytes[6]! & 0x0f) | 0x40;
+  bytes[8] = (bytes[8]! & 0x3f) | 0x80;
+  const hex = Hex.encode(bytes);
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+export const newProjectId = (): ProjectId => ProjectId.make(randomUUID());
+
+export const newThreadId = (): ThreadId => ThreadId.make(randomUUID());
+
+export const newDraftId = (): DraftId => DraftId.make(randomUUID());
+
+export const newMessageId = (): MessageId => MessageId.make(randomUUID());

@@ -1,0 +1,221 @@
+import { useId, useLayoutEffect, useRef, type ComponentProps, type ReactNode } from "react";
+import { cn } from "../../lib/utils";
+
+/** Groups may span virtualized timeline items. Each part owns its trailing space. */
+export function WorkLogBlock({
+  layout = "standalone",
+  continues = false,
+  precedesPrompt = false,
+  children,
+}: {
+  layout?: "standalone" | "group-header" | "group-content";
+  continues?: boolean | undefined;
+  precedesPrompt?: boolean | undefined;
+  children: ReactNode;
+}) {
+  return (
+    <div
+      className={
+        continues || layout === "group-header"
+          ? "pb-0"
+          : // Ends a turn: reply footers keep air under their icon buttons, so pb-6 keeps their pb-4 gap.
+            precedesPrompt
+            ? "pb-6"
+            : layout === "group-content"
+              ? "pb-1"
+              : "pb-2"
+      }
+    >
+      {children}
+    </div>
+  );
+}
+
+export function WorkLogList({ children }: { children: ReactNode }) {
+  return <div className="flex min-w-0 flex-col gap-1 ps-4">{children}</div>;
+}
+
+type RowContent = {
+  icon?: ReactNode;
+  label: ReactNode;
+  trailing?: ReactNode;
+  wrapLabel?: boolean;
+};
+
+const focusRingClassName =
+  "rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring";
+
+type LineProps = Omit<ComponentProps<"div">, "className" | "style" | "children">;
+
+function WorkLogLine({ icon, label, trailing, wrapLabel, ...lineProps }: RowContent & LineProps) {
+  return (
+    <div
+      {...lineProps}
+      className={cn(
+        "flex min-h-6 min-w-0 gap-1.25 text-body select-none min-[640px]:[--type-body:0.8125rem] min-[640px]:[--type-label:0.8125rem] [&_*]:select-none",
+        wrapLabel ? "items-start" : "items-center",
+        lineProps.role === "button" && focusRingClassName,
+      )}
+    >
+      <div className="flex min-w-0 flex-1 items-baseline gap-1.25">
+        {icon ? (
+          <span className="relative w-6 shrink-0 leading-0">
+            <span className="inline-block size-6 overflow-hidden align-[calc(0.5cap_-_0.75rem)]">
+              <span className="flex size-full items-center justify-center">{icon}</span>
+            </span>
+          </span>
+        ) : null}
+        <div
+          className={cn(
+            "min-w-0 flex-1 text-secondary-label",
+            !wrapLabel && "truncate [&_*]:whitespace-nowrap",
+          )}
+        >
+          {label}
+        </div>
+      </div>
+      {trailing}
+    </div>
+  );
+}
+
+/** The action word of a row ("Read", "Ran", "Edit"): the label role in the text tier. */
+export function WorkLogVerb({
+  children,
+  tone = "default",
+}: {
+  children: ReactNode;
+  /** `error` for an action that failed, `muted` for one still running or stopped. */
+  tone?: "default" | "error" | "muted";
+}) {
+  return (
+    <span
+      className={cn(
+        "shrink-0 text-label",
+        tone === "error"
+          ? "text-error-foreground"
+          : tone === "muted"
+            ? "text-muted-foreground"
+            : "text-foreground",
+      )}
+    >
+      {children}
+    </span>
+  );
+}
+
+/**
+ * What the action touched ("ChatComposer.tsx", a command): body type in the dim
+ * tier, truncating first. `mono` for commands and code.
+ */
+export function WorkLogTarget({ children, mono = false }: { children: ReactNode; mono?: boolean }) {
+  return (
+    <span className={cn("min-w-0 truncate text-body text-dim-foreground", mono && "font-mono")}>
+      {children}
+    </span>
+  );
+}
+
+function rowClassName(interactive: boolean, focusable = interactive) {
+  return cn(
+    "group/timeline-row relative w-full min-w-0 rounded-md pe-1.5 text-left transition-colors",
+    interactive && "cursor-pointer hover:surface-ghost-hover",
+    focusable && focusRingClassName,
+  );
+}
+
+export function WorkLogButton({
+  icon,
+  label,
+  trailing,
+  wrapLabel = false,
+  ...buttonProps
+}: RowContent & Omit<ComponentProps<"button">, "className" | "style" | "children">) {
+  const className = rowClassName(true);
+  return (
+    <button {...buttonProps} type="button" className={className}>
+      <WorkLogLine icon={icon} label={label} trailing={trailing} wrapLabel={wrapLabel} />
+    </button>
+  );
+}
+
+type RowProps = Omit<ComponentProps<"div">, "className" | "style"> & {
+  toggle?: LineProps | undefined;
+};
+
+/**
+ * Div disclosure permits selectable detail and nested actions. `toggle` goes on
+ * the header line only: assistive tech hides a button's children.
+ */
+export function WorkLogRow({
+  icon,
+  label,
+  trailing,
+  wrapLabel = false,
+  toggle,
+  children,
+  ...rowProps
+}: RowContent & RowProps) {
+  const className = rowClassName(rowProps.onClick !== undefined, false);
+  const detailsId = useId();
+  return (
+    <div {...rowProps} className={className}>
+      <WorkLogLine
+        aria-controls={toggle ? detailsId : undefined}
+        {...toggle}
+        icon={icon}
+        label={label}
+        trailing={trailing}
+        wrapLabel={wrapLabel}
+      />
+      {toggle ? <div id={detailsId}>{children}</div> : children}
+    </div>
+  );
+}
+
+const LIVE_EDGE_PX = 4;
+
+export function WorkLogDetails({
+  children,
+  kind = "text",
+  followLive = false,
+}: {
+  children: ReactNode;
+  kind?: "text" | "panel";
+
+  followLive?: boolean;
+}) {
+  const scrollerRef = useRef<HTMLDivElement>(null);
+  const atLiveEdgeRef = useRef(true);
+  // oxlint-disable-next-line dacre/no-unreasoned-state-sync -- pins the scroller's scrollTop to the bottom after each commit while following live output
+  useLayoutEffect(() => {
+    const scroller = scrollerRef.current;
+    if (followLive && atLiveEdgeRef.current && scroller) {
+      scroller.scrollTop = scroller.scrollHeight;
+    }
+  });
+  // Text and panel edges start on the row's label line.
+  return (
+    <div
+      ref={scrollerRef}
+      onScroll={(event) => {
+        const { scrollHeight, scrollTop, clientHeight } = event.currentTarget;
+        atLiveEdgeRef.current = scrollHeight - scrollTop - clientHeight <= LIVE_EDGE_PX;
+      }}
+      className={cn(
+        "ms-7.5 cursor-auto",
+        kind === "text"
+          ? "flex max-h-96 flex-col gap-3 overflow-auto pe-0.5 py-1 select-text"
+          : "mt-0.5 mb-1.5 pb-2",
+      )}
+      onClick={(event) => event.stopPropagation()}
+      onPointerDown={(event) => event.stopPropagation()}
+    >
+      {children}
+    </div>
+  );
+}
+
+/** A command's output inside an opened row, in a `WorkLogDetails` panel. */
+export const WORK_LOG_OUTPUT_CLASS_NAME =
+  "max-h-64 cursor-text overflow-auto whitespace-pre-wrap break-words font-mono text-muted-foreground text-(length:--font-size-code,var(--text-2xs)) leading-relaxed select-text";
