@@ -4,38 +4,34 @@
 
 <h1 align="center">Dacre</h1>
 
-<p align="center"><strong>Your code. Your models. Your control.</strong></p>
+<p align="center"><strong>A local-first workspace for AI coding agents</strong></p>
 
 <p align="center">
-  <a href="./docs/user/install.md">Run from source</a> ·
+  <a href="#quick-start">Quick start</a> ·
   <a href="./docs/README.md">Docs</a> ·
   <a href="./ROADMAP.md">Roadmap</a> ·
-  <a href="./CHANGELOG.md">Changelog</a>
+  <a href="https://github.com/DacreDev/Dacre/issues">Issues</a>
 </p>
 
-Dacre is a desktop and web workspace for the coding agents on your machine. It drives Claude Code, Codex, Cursor, OpenCode, Grok Build, Antigravity, Kiro, Pi, Muse Code, fx and any [ACP](./docs/user/providers-acp.md) agent from one fast interface. If an agent is set up on your computer, Dacre can control it.
+Dacre is an open-source desktop and web app for running **Claude Code, Codex, Cursor, OpenCode**, and other coding agents from one workspace. Use the provider accounts you already have, run tasks in separate Git worktrees, and review the diffs and check results together.
 
-## What you get
+**Early preview.** Run Dacre from source today. The Windows installer can be built locally and is unsigned. The macOS and Linux desktop builds are still unverified for Dacre. See the [roadmap](./ROADMAP.md) and [changelog](./CHANGELOG.md) for project progress.
 
-- **Your subscriptions.** Dacre does not resell tokens. It drives the agents you already pay for and are signed in to.
-- **Agent modes.** Ask, Plan, Agent, Architect, Debug, Review, Parallel, Performance, UI/UX, Research and 3D, plus modes you write yourself. Switch with the picker, `mod+.` or a command such as `/plan`. Read-only modes are enforced through each provider's own plan mode or sandbox where it has one.
-- **Brain.** A local memory of your project's conventions, decisions and known issues. Agents search it and add what they learn. Only you can pin, edit or delete entries, and it refuses to store secrets.
-- **Every agent in one place.** Change models in the middle of a thread. Let Claude hand a task to Codex, or split work across agents in separate worktrees. Mission Control shows every agent that is running, waiting on you, or done today. Add an MCP server once and every agent that can take it gets its tools.
-- **Review before you keep it.** Each finished turn shows whether its tests, lint, type checks and builds passed, read from exit codes rather than the agent's word. Ask another agent for a second opinion, or revert one file of a turn.
-- **A workspace, not a chat window.** Split panes, a terminal, diffs, a browser preview, file previews including 3D models, Go to symbol, and a command palette for everything.
-- **Remote ready.** Run agents on any machine and connect over your local network or Tailscale.
-- **Git built in.** Each thread can work in its own worktree. Review the diff, then commit, push and open a pull request.
-- **Local and open.** Your data stays on your machine, telemetry is off, and the code is MIT licensed.
+## What you can do with Dacre
 
-## Status
+- **Coordinate parallel work.** Give each task its own [Git worktree](./docs/user/source-control.md). Use Mission Control to see which agents are running, waiting for input, or finished.
+- **Review changes in place.** Read diffs, see which tests and other checks ran and how they exited, ask a second agent for a review, or revert an individual file.
+- **Keep project context across sessions.** Brain gives agents a searchable local store for project conventions, decisions, and known issues. You can edit, pin, or remove entries.
+- **Choose how an agent works.** Switch between modes such as Ask, Plan, Debug, and Review, or define your own. Set up [MCP servers](./docs/user/mcp-servers.md) once and share them with compatible providers.
+- **Work locally or connect to another machine.** Use split panes, an integrated terminal, and browser and file previews, including 3D models. Connect to your agent host over your [local network or Tailscale](./docs/user/remote-access.md). Dacre's telemetry is off by default.
 
-Dacre supports Windows, Linux and macOS through its desktop app, plus the web client in a browser. There are no iOS or Android apps.
+## Supported agents
 
-Dacre is early. There are no published releases yet, so you run it from source or build the Windows installer yourself. The installer is not code-signed, so Windows SmartScreen warns before it runs. The macOS and Linux builds have not been built or tested in this fork. [ROADMAP.md](./ROADMAP.md) lists what is done and what is next.
+Claude Code, Codex, Cursor, OpenCode, Grok Build, Antigravity, Kiro, Pi, Muse Code, and fx. You can also connect agents that use the [Agent Client Protocol (ACP)](./docs/user/providers-acp.md).
 
-## Run from source
+## Quick start
 
-You need Git, [Node.js 26.13.1](https://nodejs.org/), and [pnpm 12.14.0](https://pnpm.io/).
+Install Git, [Node.js 26.13.1](https://nodejs.org/), and [pnpm 12.14.0](https://pnpm.io/). To start a thread, install and sign in to at least one [supported agent](./docs/user/install.md#providers).
 
 ```bash
 git clone https://github.com/DacreDev/Dacre.git
@@ -46,7 +42,7 @@ pnpm exec vp run dev
 
 On Windows, clone with `git clone -c core.longpaths=true https://github.com/DacreDev/Dacre.git`.
 
-Open the pairing URL the dev server prints. To run the desktop app instead, use `pnpm exec vp run dev:desktop`.
+Open the pairing URL shown in your terminal to use Dacre in your browser. For the desktop app, run `pnpm exec vp run dev:desktop`.
 
 ### Build the Windows installer
 
@@ -54,13 +50,7 @@ Open the pairing URL the dev server prints. To run the desktop app instead, use 
 pnpm exec vp run dist:desktop:win:x64
 ```
 
-The installer lands in `release/`. [Windows installer prerequisites](./docs/operations/00_development.md#windows-installer-prerequisites) lists the build tools it needs.
-
-### Sign in to an agent
-
-Dacre needs one agent that is installed and signed in. For example, install [Claude Code](https://claude.com/product/claude-code) and run `claude auth login`, or install [Codex CLI](https://developers.openai.com/codex/cli) and run `codex login`.
-
-[Provider setup](./docs/user/install.md#providers) has the steps for each agent.
+The installer lands in `release/`. See the [Windows installer prerequisites](./docs/operations/00_development.md#windows-installer-prerequisites) for the required build tools.
 
 ## Documentation
 
@@ -76,11 +66,7 @@ Dacre needs one agent that is installed and signed in. For example, install [Cla
 
 ## Contributing
 
-Read [CONTRIBUTING.md](./CONTRIBUTING.md) before you open a pull request, and follow the [code of conduct](./CODE_OF_CONDUCT.md). The [development runbook](./docs/operations/00_development.md#first-checkout) covers setup, and the [architecture overview](./docs/internals/01_architecture.md) explains how it works.
-
-## Support Dacre
-
-Dacre is built for developers who want freedom, performance and control. If it helps you build better software, star the [repository](https://github.com/DacreDev/Dacre), report bugs, improve the docs or send a pull request.
+If you hit a setup issue or find a bug, [open a GitHub issue](https://github.com/DacreDev/Dacre/issues/new/choose). Before submitting a pull request, read the [contribution guide](./CONTRIBUTING.md) and [code of conduct](./CODE_OF_CONDUCT.md). For contributor setup and internals, see the [development runbook](./docs/operations/00_development.md#first-checkout) and [architecture overview](./docs/internals/01_architecture.md).
 
 ## Credit
 
