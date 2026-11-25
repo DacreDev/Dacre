@@ -57,7 +57,6 @@ anything.
 - [05 · Remote environments](./internals/05_remote.md)
 - [06 · Dacre Connect](./internals/06_dacre-connect.md)
 - [07 · Server updates](./internals/07_server-updates.md)
-- [08 · Product analytics](./internals/08_product-analytics.md)
 - [09 · Connection runtime](./internals/09_connection-runtime.md)
 - [10 · Web UI](./internals/10_web-ui.md)
 - [14 · Translating the UI (i18n)](./internals/14_i18n.md)

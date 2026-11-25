@@ -129,7 +129,6 @@ Read the matching doc before changing code in that area; code review enforces th
 | Remote routes, peer links, previews        | [05_remote.md](docs/internals/05_remote.md)                                                              |
 | Dacre Connect & relay                      | [06_dacre-connect.md](docs/internals/06_dacre-connect.md)                                                |
 | Server updates & crash recovery            | [07_server-updates.md](docs/internals/07_server-updates.md)                                              |
-| Telemetry & analytics                      | [08_product-analytics.md](docs/internals/08_product-analytics.md)                                        |
 | Client connection & sync runtime           | [09_connection-runtime.md](docs/internals/09_connection-runtime.md)                                      |
 | Web UI primitives, styles & React Compiler | [10_web-ui.md](docs/internals/10_web-ui.md)                                                              |
 | Translations & UI copy                     | [14_i18n.md](docs/internals/14_i18n.md)                                                                  |

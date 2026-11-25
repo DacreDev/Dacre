@@ -1,17 +1,9 @@
 # Product usage data
 
-Dacre does not collect product usage data. Its analytics code ships with no key and no endpoint,
-so it sends nothing unless the person who builds or runs it sets `DACRE_POSTHOG_KEY` and
-`DACRE_POSTHOG_HOST`.
+Dacre does not collect product usage data and has no analytics code.
 
-If you configure an endpoint, the server sends events to it, associated with a hashed account or
-installation identifier. Events include the provider, model, reasoning effort, permission mode,
-turn and request results, duration, release channel, and token counts when available. They do not
-include prompts, responses, file contents, authentication tokens, conversation IDs, raw provider
-events, or child-agent output. The one exception is agent feedback, below.
-
-To turn product events and relay tracing off for a server, set `DACRE_TELEMETRY_ENABLED=false` in
-its environment before starting it. An administrator can do the same with a
+To turn relay tracing off for a server, set `DACRE_TELEMETRY_ENABLED=false` in its environment
+before starting it. An administrator can do the same with a
 [managed policy](./managed-policy.md#other-capabilities).
 
 ## Agent feedback
@@ -22,8 +14,8 @@ default.
 
 Reports are saved on your machine, and `dacre feedback list` shows them. Before anything is saved,
 Dacre removes file paths, your user name, machine name, project title, branch, git remote, and
-anything that looks like a key, token, email address, or URL with a password. A report leaves your
-machine only if you configured an analytics endpoint.
+anything that looks like a key, token, email address, or URL with a password. Reports never leave
+your machine.
 
 ## Relay diagnostics
 
