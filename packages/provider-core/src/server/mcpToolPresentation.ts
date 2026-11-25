@@ -19,6 +19,17 @@ export function normalizeMcpHttpUrl(value: unknown): string | undefined {
   }
 }
 
+// The split `/^mcp__(.+?)__(.+)$/i` makes, without retrying the tool part after every later `__`.
+export function splitQualifiedMcpToolName(
+  name: string,
+): { readonly server: string; readonly tool: string } | undefined {
+  if (name.slice(0, 5).toLowerCase() !== "mcp__" || /[\n\r\u2028\u2029]/.test(name))
+    return undefined;
+  const separator = name.indexOf("__", 6);
+  if (separator === -1 || separator + 2 === name.length) return undefined;
+  return { server: name.slice(5, separator), tool: name.slice(separator + 2) };
+}
+
 export function mcpToolPresentation(input: {
   readonly toolName?: unknown;
   readonly serverName?: unknown;
@@ -35,9 +46,9 @@ export function mcpToolPresentation(input: {
   const source =
     typeof input.source === "object" && input.source !== null ? input.source : undefined;
   const qualified =
-    typeof input.toolName === "string" ? /^mcp__(.+?)__(.+)$/i.exec(input.toolName) : null;
-  const server = normalizeMcpText(input.serverName ?? qualified?.[1] ?? input.serverDisplayName);
-  const tool = normalizeMcpText(qualified?.[2] ?? input.toolName);
+    typeof input.toolName === "string" ? splitQualifiedMcpToolName(input.toolName) : undefined;
+  const server = normalizeMcpText(input.serverName ?? qualified?.server ?? input.serverDisplayName);
+  const tool = normalizeMcpText(qualified?.tool ?? input.toolName);
   if (server && tool && resolveDacreMcpToolDefinition(`${server}.${tool}`)) return {};
   const title =
     normalizeMcpText(input.title) ??

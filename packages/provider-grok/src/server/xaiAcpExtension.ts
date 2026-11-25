@@ -783,6 +783,21 @@ function resultTaskIdFromGetOutputTool(
   return taskHeader;
 }
 
+// `text.replace(/<tag>[\s\S]*?<\/tag>/gi, "")` without rescanning to the end from every unclosed tag.
+function withoutTagBlocks(text: string, tag: string): string {
+  const open = new RegExp(`<${tag}>`, "gi");
+  const close = new RegExp(`</${tag}>`, "gi");
+  let kept = "";
+  let from = 0;
+  for (let start = open.exec(text); start !== null; start = open.exec(text)) {
+    close.lastIndex = open.lastIndex;
+    if (close.exec(text) === null) break;
+    kept += text.slice(from, start.index);
+    from = open.lastIndex = close.lastIndex;
+  }
+  return kept + text.slice(from);
+}
+
 function resultFromGetOutputTool(
   toolCall: AcpToolCallState,
   output: string | undefined,
@@ -794,10 +809,10 @@ function resultFromGetOutputTool(
     nonEmptyString(result?.text) ??
     decodeByteText(result?.output);
   if (structured !== undefined) {
-    const cleaned = structured
-      .replace(/<subagent_meta>[\s\S]*?<\/subagent_meta>/gi, "")
-      .replace(/<subagent_result>[\s\S]*?<\/subagent_result>/gi, "")
-      .trim();
+    const cleaned = withoutTagBlocks(
+      withoutTagBlocks(structured, "subagent_meta"),
+      "subagent_result",
+    ).trim();
     if (cleaned.length > 0) return cleaned;
     return null;
   }
@@ -999,7 +1014,10 @@ export function makeXAiExitPlanModeCapturedResponse(feedback?: string): XAiExitP
 }
 
 function normalizeFsPath(value: string): string {
-  return value.trim().replace(/\\/g, "/").replace(/\/+$/, "");
+  const normalized = value.trim().replace(/\\/g, "/");
+  let end = normalized.length;
+  while (normalized[end - 1] === "/") end -= 1;
+  return normalized.slice(0, end);
 }
 
 function pathHasTraversalSegment(normalized: string): boolean {

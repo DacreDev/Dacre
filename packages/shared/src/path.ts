@@ -20,6 +20,13 @@ export function isWslSharePath(value: string): boolean {
   return /^[\\/]{2}(?:[?.][\\/]UNC[\\/])?wsl(?:\.localhost|\$)[\\/]/i.test(value.trim());
 }
 
+/** Drops trailing `chars`; a loop because an unanchored `/x+$/` backtracks quadratically. */
+export function trimEndChars(value: string, chars: string): string {
+  let end = value.length;
+  while (end > 0 && chars.includes(value[end - 1]!)) end -= 1;
+  return value.slice(0, end);
+}
+
 export function isWindowsAbsolutePath(value: string): boolean {
   return isUncPath(value) || isWindowsDrivePath(value);
 }
@@ -44,9 +51,7 @@ function trimTrailingPathSeparators(value: string): string {
   if (value.length === 0 || isRootPath(value)) {
     return value;
   }
-  const trimmed = value.startsWith("/")
-    ? value.replace(/\/+$/g, "")
-    : value.replace(/[\\/]+$/g, "");
+  const trimmed = trimEndChars(value, value.startsWith("/") ? "/" : "/\\");
   if (trimmed.length === 0) {
     return value;
   }
@@ -127,7 +132,7 @@ export function stripSlashPrefixedWindowsDrive(path: string): string {
 }
 
 export function fileBasename(path: string): string {
-  const trimmed = path.replace(/[/\\]+$/, "");
+  const trimmed = trimEndChars(path, "/\\");
   if (trimmed.length === 0) return path;
   const separatorIndex = Math.max(trimmed.lastIndexOf("/"), trimmed.lastIndexOf("\\"));
   return separatorIndex >= 0 ? trimmed.slice(separatorIndex + 1) : trimmed;
@@ -149,14 +154,15 @@ export function workspaceRelativeFilePath(
   const normalizedPath = caseInsensitive
     ? stripSlashPrefixedWindowsDrive(path.replaceAll("\\", "/"))
     : path;
-  const normalizedRoot = (
+  const normalizedRoot = trimEndChars(
     caseInsensitive
       ? stripSlashPrefixedWindowsDrive(workspaceRoot.replaceAll("\\", "/"))
-      : workspaceRoot
-  ).replace(/\/+$/, "");
+      : workspaceRoot,
+    "/",
+  );
   const pathForCompare = caseInsensitive ? normalizedPath.toLowerCase() : normalizedPath;
   const rootForCompare = caseInsensitive ? normalizedRoot.toLowerCase() : normalizedRoot;
-  if (pathForCompare.replace(/\/+$/, "") === rootForCompare) return ".";
+  if (trimEndChars(pathForCompare, "/") === rootForCompare) return ".";
   if (!pathForCompare.startsWith(`${rootForCompare}/`)) return null;
   const relativePath = normalizedPath.slice(normalizedRoot.length + 1);
   // `/repo/../x` starts with the root but escapes it; the server rejects that as a workspace path.
@@ -179,7 +185,29 @@ export function isHostPath(value: string): boolean {
 }
 
 // Finder and Explorer copy a path ready for a shell: `'/a b'`, `/a\'s\ b`, or `"C:\a b"`.
-const QUOTED_PATH_AT_END = /(?:'((?:[^']|'\\'')+)'|"([^"]+)")\s*$/;
+// The leftmost `'…'` (with `'\''` escapes) or `"…"` that ends the text, found in one pass; the
+// unanchored regex `(?:'((?:[^']|'\\'')+)'|"([^"]+)")\s*$` backtracks quadratically.
+function quotedPathAtEnd(text: string): { readonly index: number; readonly path: string } | null {
+  const end = text.trimEnd().length - 1;
+  if (text[end] === '"') {
+    const index = text.lastIndexOf('"', end - 1);
+    return index >= 0 && index < end - 1 ? { index, path: text.slice(index + 1, end) } : null;
+  }
+  if (text[end] !== "'") return null;
+  // bodyFrom[i]: text[i..end) is only non-quotes and `'\''` escapes.
+  const bodyFrom: boolean[] = [];
+  bodyFrom[end] = true;
+  let index = -1;
+  for (let i = end - 1; i >= 0; i -= 1) {
+    if (text[i] !== "'") {
+      bodyFrom[i] = bodyFrom[i + 1]!;
+      continue;
+    }
+    bodyFrom[i] = i + 4 <= end && text.startsWith("'\\''", i) && bodyFrom[i + 4]!;
+    if (i + 1 < end && bodyFrom[i + 1]) index = i;
+  }
+  return index >= 0 ? { index, path: text.slice(index + 1, end).replaceAll("'\\''", "'") } : null;
+}
 const SHELL_ESCAPE = /\\([\s'"\\()[\]{}<>|&;$`!*?#~^=])/g;
 
 // Folder browsers only navigate `~/` home paths, so a pasted `~\` path is not a replacement.
@@ -197,11 +225,10 @@ export function resolvePastedPath(previous: string, next: string): string {
     : previous.startsWith(next);
   if (isTyping) return next;
 
-  const match = QUOTED_PATH_AT_END.exec(next);
+  const quoted = quotedPathAtEnd(next);
   // Text before the quote that wasn't in the box is a search, not a folder to paste after.
-  if (match && previous.startsWith(next.slice(0, match.index).trimEnd())) {
-    const quoted = match[1]?.replaceAll("'\\''", "'") ?? match[2] ?? "";
-    if (isPastedFolderPath(quoted)) return quoted;
+  if (quoted && previous.startsWith(next.slice(0, quoted.index).trimEnd())) {
+    if (isPastedFolderPath(quoted.path)) return quoted.path;
   }
 
   // Without a trailing separator, `/a` then `/a/b` is a longer path, not one pasted after a folder.
@@ -214,7 +241,7 @@ export function resolvePastedPath(previous: string, next: string): string {
 
 export function resolveWorkspaceFilePath(path: string, workspaceRoot: string): string {
   if (isAbsolutePath(path) || path.startsWith("~/") || path.startsWith("~\\")) return path;
-  const base = workspaceRoot.replace(/[/\\]+$/, "");
+  const base = trimEndChars(workspaceRoot, "/\\");
   return isWindowsAbsolutePath(workspaceRoot)
     ? `${base}\\${path.replaceAll("/", "\\")}`
     : `${base}/${path}`;

@@ -473,8 +473,13 @@ const DA_MCP_TOOLS: Readonly<Record<string, DacreMcpToolDefinition>> = {
 export const DA_MCP_TOOL_NAMES: ReadonlySet<string> = new Set(Object.keys(DA_MCP_TOOLS));
 
 function normalizeDacreMcpToolLabel(value: string): string {
-  return value.replace(/\s+(?:complete|completed)\s*$/i, "").trim();
+  const trimmed = value.trimEnd();
+  const suffix = /\scompleted?$/i.exec(trimmed);
+  return (suffix ? trimmed.slice(0, suffix.index) : trimmed).trim();
 }
+
+// What `.` rejects: a `.+$` tail cannot span these.
+const LINE_TERMINATOR = /[\n\r\u2028\u2029]/;
 
 // Timelines resolve every work row's tool name on each update; names repeat across updates.
 // ACP titles can carry whole commands, so long labels are parsed but not kept.
@@ -495,21 +500,20 @@ function resolveDacreMcpToolName(value: string): string | null {
 // ACP tool prefixes vary; match loosely but require a known display-name entry.
 function parseDacreMcpToolName(value: string): string | null {
   const label = normalizeDacreMcpToolLabel(value);
-  const mcpMatch = /^mcp__(?<server>.+?)__(?<tool>.+)$/i.exec(label);
-  if (mcpMatch?.groups) {
-    const { server, tool } = mcpMatch.groups;
-    return server !== undefined &&
-      tool !== undefined &&
-      DA_MCP_SERVER_ALIASES.has(server.toLowerCase())
-      ? tool
+  // String scans instead of `.+?__.+$` style regexes, which backtrack quadratically.
+  const separator =
+    /^mcp__/i.test(label) && !LINE_TERMINATOR.test(label) ? label.indexOf("__", 6) : -1;
+  if (separator !== -1 && separator + 2 < label.length) {
+    return DA_MCP_SERVER_ALIASES.has(label.slice(5, separator).toLowerCase())
+      ? label.slice(separator + 2)
       : null;
   }
 
-  const namespaceMatch = /^(?<server>dacre[-_]direct|dacre)(?:[.:/]|\s*·\s*)(?<tool>.+)$/i.exec(
-    label,
-  );
-  if (namespaceMatch?.groups) {
-    return namespaceMatch.groups.tool ?? null;
+  const namespace = /^(?:dacre[-_]direct|dacre)(?:[.:/]|\s*·)/i.exec(label);
+  if (namespace) {
+    const rest = label.slice(namespace[0].length);
+    const tool = namespace[0].endsWith("·") ? rest.trimStart() || rest.slice(-1) : rest;
+    if (tool && !LINE_TERMINATOR.test(tool)) return tool;
   }
 
   // Dacre's own tools start with the server's name, so the whole label is tried first.

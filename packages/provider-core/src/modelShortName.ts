@@ -61,9 +61,25 @@ function withoutFamily(name: string, nativeFamilies: ReadonlyArray<string>): str
 
 function nonVersionWords(text: string): ReadonlyArray<string> {
   return text
-    .replace(/\(.*?\)/g, " ")
+    .split(/[\n\r\u2028\u2029]/)
+    .map(withoutParenthesized)
+    .join(" ")
     .split(/[\s-]+/)
     .filter((word) => word.length > 0 && !VERSION.test(word));
+}
+
+// `line.replace(/\(.*?\)/g, " ")` without rescanning to the end from every unclosed `(`.
+function withoutParenthesized(line: string): string {
+  const parts = line.split(")");
+  const tail = parts.pop() ?? "";
+  return (
+    parts
+      .map((part) => {
+        const open = part.indexOf("(");
+        return open === -1 ? `${part})` : `${part.slice(0, open)} `;
+      })
+      .join("") + tail
+  );
 }
 
 function namesModel(text: string): boolean {

@@ -8,6 +8,7 @@ import * as EffectAcpSchema from "effect-acp/compat";
 import * as EffectAcpSchemaV1 from "effect-acp/schema-v1";
 import { deriveToolActivityPresentation, mergeToolActivityData } from "@dacre/shared/toolActivity";
 import { DA_MCP_TOOL_NAMES } from "@dacre/shared/dacreMcpToolPresentation";
+import { splitQualifiedMcpToolName } from "@dacre/provider-core/server/mcpToolPresentation";
 import type {
   OrchestrationV2ProviderThreadNativeMetadata,
   ThreadTokenUsageSnapshot,
@@ -1087,7 +1088,33 @@ export interface AcpMcpToolCallIdentity {
   readonly input?: Record<string, unknown>;
 }
 
-const ACP_MCP_FALLBACK_CALL = /(?:^|[\s"'=])acp-mcp-call[\s"']+([A-Za-z0-9_.-]+)(?:\s+(.+?))?\s*$/u;
+const ACP_MCP_FALLBACK_CALL = /(?:^|[\s"'=])acp-mcp-call[\s"']+([A-Za-z0-9_.-]+)/gu;
+const LEADING_WHITESPACE = /\s*/uy;
+
+// Matches as `/…([A-Za-z0-9_.-]+)(?:\s+(.+?))?\s*$/u` did without its polynomial backtracking: the
+// tool name ends the command or is followed by whitespace, then input that fits on the last line.
+function acpMcpFallbackCall(command: string): { tool: string; input?: string } | undefined {
+  const content = command.trimEnd();
+  const lastLineStart =
+    Math.max(...["\n", "\r", "\u2028", "\u2029"].map((t) => content.lastIndexOf(t))) + 1;
+  ACP_MCP_FALLBACK_CALL.lastIndex = 0;
+  for (
+    let match = ACP_MCP_FALLBACK_CALL.exec(command);
+    match?.[1] !== undefined;
+    match = ACP_MCP_FALLBACK_CALL.exec(command)
+  ) {
+    const nameEnd = match.index + match[0].length;
+    ACP_MCP_FALLBACK_CALL.lastIndex = match.index + 1;
+    LEADING_WHITESPACE.lastIndex = nameEnd;
+    LEADING_WHITESPACE.exec(command);
+    const inputStart = LEADING_WHITESPACE.lastIndex;
+    if (inputStart >= content.length) return { tool: match[1] };
+    if (inputStart > nameEnd && inputStart >= lastLineStart) {
+      return { tool: match[1], input: content.slice(inputStart) };
+    }
+  }
+  return undefined;
+}
 
 function acpMcpFallbackInput(value: string | undefined): Record<string, unknown> | undefined {
   if (value === undefined) return undefined;
@@ -1212,18 +1239,17 @@ export function extractMcpToolCallIdentity(
   ].filter((value): value is string => typeof value === "string");
   for (const candidate of candidates) {
     const trimmed = candidate.trim();
-    const qualified = /^mcp__(.+?)__(.+)$/i.exec(trimmed);
+    const qualified = splitQualifiedMcpToolName(trimmed);
     // Hermes renames client MCP servers to editor_<sanitized name>_<8 hex of a per-session hash>.
     if (
-      qualified?.[1] &&
-      qualified[2] &&
-      /^editor_dacre_[0-9a-f]{8}$/.test(qualified[1]) &&
-      DA_MCP_TOOL_NAMES.has(qualified[2])
+      qualified &&
+      /^editor_dacre_[0-9a-f]{8}$/.test(qualified.server) &&
+      DA_MCP_TOOL_NAMES.has(qualified.tool)
     ) {
-      return { server: "dacre", tool: qualified[2] };
+      return { server: "dacre", tool: qualified.tool };
     }
-    if (qualified?.[1] && qualified[2] && !/^dacre$/i.test(qualified[1]))
-      return { server: qualified[1], tool: qualified[2] };
+    if (qualified && !/^dacre$/i.test(qualified.server))
+      return { server: qualified.server, tool: qualified.tool };
     const name = ANTIGRAVITY_TOOL_TITLE.exec(trimmed)?.groups?.name ?? trimmed;
     // Dacre's own tools start with the server's name, so every spelling asks the inventory.
     const candidateTool = [DA_MCP_TITLE_CALL, DA_MCP_TITLE_SUFFIX_CALL, DA_MCP_BARE_TITLE_CALL]
@@ -1240,10 +1266,10 @@ export function extractMcpToolCallIdentity(
     ...(options?.embeddedTerminalCommands ?? []),
   ];
   for (const command of commands) {
-    const match = ACP_MCP_FALLBACK_CALL.exec(command);
-    if (match?.[1] !== undefined) {
-      const input = acpMcpFallbackInput(match[2]);
-      return { server: "dacre", tool: match[1], ...(input === undefined ? {} : { input }) };
+    const call = acpMcpFallbackCall(command);
+    if (call !== undefined) {
+      const input = acpMcpFallbackInput(call.input);
+      return { server: "dacre", tool: call.tool, ...(input === undefined ? {} : { input }) };
     }
   }
   return undefined;

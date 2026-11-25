@@ -20,7 +20,9 @@ export function stripAppImageRuntimeEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessE
     delete scrubbed[key];
   }
 
-  const appDir = env.APPDIR?.replace(/\/+$/, "");
+  let appDirEnd = env.APPDIR?.length ?? 0;
+  while (env.APPDIR?.[appDirEnd - 1] === "/") appDirEnd--;
+  const appDir = env.APPDIR?.slice(0, appDirEnd);
   if (appDir) {
     for (const [key, separator] of Object.entries(APPIMAGE_PATH_LIKE_ENV_SEPARATORS)) {
       const value = scrubbed[key];

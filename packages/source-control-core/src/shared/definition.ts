@@ -477,7 +477,9 @@ export function repositoryUrlFromPagePath(url: URL, route: RegExp): string | nul
 }
 
 export function changeRequestUrlBelow(webUrl: string, route: string): string {
-  return `${webUrl.replace(/\/+$/u, "")}/${route}`;
+  let end = webUrl.length;
+  while (webUrl[end - 1] === "/") end -= 1;
+  return `${webUrl.slice(0, end)}/${route}`;
 }
 
 /** An HTTP remote on `host` names the server's web origin, port included; SSH remotes do not. */

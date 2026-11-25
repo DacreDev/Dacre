@@ -541,7 +541,7 @@ describe("readTranscriptRecords resume", () => {
 
   it("keeps a CRLF Codex reducer line whose marker straddles a stream chunk", async () => {
     const path = NodePath.join(dir, "rollout.jsonl");
-    const crlf = (line: string) => line.replace("\n", "\r\n");
+    const crlf = (line: string) => line.replaceAll("\n", "\r\n");
     const modelLine = crlf(codexModelLine("gpt-5.2-codex"));
     const head = crlf(codexMetaLine());
     const fillerBytes =

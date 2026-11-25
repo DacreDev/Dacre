@@ -178,6 +178,12 @@ overrides:
   vite: "catalog:"
   vite-plus: "catalog:"
   yaml: "catalog:"
+  # Security floors (Dependabot): these parents still ask for vulnerable releases.
+  # GHSA-g3hv-75wg-m249 (minimatch), GHSA-238p-pmpm-9mq7 (katex), GHSA-776f-qx25-q3cc (xml2js).
+  "app-builder-lib>minimatch": ^11.0.1
+  "@electron/universal>minimatch": ^11.0.1
+  "micromark-extension-llm-math>katex": ^0.18.2
+  "dbus-next>xml2js": ^0.5.0
 
 packageExtensions:
   # Our patch makes @effect/vitest import vite-plus/test. A catalog: spec here

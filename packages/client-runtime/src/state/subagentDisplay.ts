@@ -127,11 +127,48 @@ export function subagentDetailPreview(input: {
   return compact || null;
 }
 
+// Index after the `)` closing a link target that starts at `at`; targets allow escapes and one level of parens.
+function linkTargetEnd(text: string, at: number): number {
+  let nested = false;
+  for (let index = at; index < text.length; index += 1) {
+    const char = text[index]!;
+    if (char === "\\") {
+      if (index + 1 === text.length || "\n\r\u2028\u2029".includes(text[index + 1]!)) return -1;
+      index += 1;
+    } else if (char === "(") {
+      if (nested) return -1;
+      nested = true;
+    } else if (char === ")") {
+      if (!nested) return index + 1;
+      nested = false;
+    }
+  }
+  return -1;
+}
+
+// `text.replace(/!?\[([^\]]+)\]\((?:\\.|[^\\()]|\((?:\\.|[^\\()])*\))*\)/g, "$1")` without
+// rescanning to the end from every `[`.
+function withoutMarkdownLinks(text: string): string {
+  let kept = "";
+  let from = 0;
+  let search = 0;
+  for (let open = text.indexOf("["); open !== -1; open = text.indexOf("[", search)) {
+    const close = text.indexOf("]", open + 1);
+    if (close === -1) break;
+    search = close + 1;
+    const end = close > open + 1 && text[close + 1] === "(" ? linkTargetEnd(text, close + 2) : -1;
+    if (end === -1) continue;
+    const start = open > from && text[open - 1] === "!" ? open - 1 : open;
+    kept += text.slice(from, start) + text.slice(open + 1, close);
+    from = search = end;
+  }
+  return kept + text.slice(from);
+}
+
 export function subagentCardDetail(detail: string | null | undefined): string | null {
   if (!detail || /^Child task ended with status\b/i.test(detail)) return null;
   return (
-    detail
-      .replace(/!?\[([^\]]+)\]\((?:\\.|[^\\()]|\((?:\\.|[^\\()])*\))*\)/g, "$1")
+    withoutMarkdownLinks(detail)
       .replace(/`/g, "")
       .replace(/^[ \t]*[-*][ \t]+/gm, "")
       .replace(/\s+/g, " ")

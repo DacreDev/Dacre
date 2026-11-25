@@ -762,6 +762,24 @@ export function workflowStepTime(ms: number): string {
  * The first sentence of a reply, as one line of plain text: a heading, list mark, inline code,
  * emphasis or link reads as its words.
  */
+// `text.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")` without rescanning to the end from every `[`.
+function withoutMarkdownLinks(text: string): string {
+  let kept = "";
+  let from = 0;
+  let search = 0;
+  for (let open = text.indexOf("["); open !== -1; open = text.indexOf("[", search)) {
+    const close = text.indexOf("]", open + 1);
+    if (close === -1) break;
+    search = close + 1;
+    if (text[close + 1] !== "(") continue;
+    const end = text.indexOf(")", close + 2);
+    if (end === -1) break;
+    kept += text.slice(from, open) + text.slice(open + 1, close);
+    from = search = end + 1;
+  }
+  return kept + text.slice(from);
+}
+
 export function workflowOneLine(text: string): string {
   const line =
     text
@@ -769,8 +787,7 @@ export function workflowOneLine(text: string): string {
       .map((candidate) => candidate.trim())
       .find((candidate) => candidate !== "" && !/^(#|```|\|)/.test(candidate))
       ?.replace(/^([-*>]|\d+\.)\s+/, "") ?? "";
-  const plain = line
-    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+  const plain = withoutMarkdownLinks(line)
     .replace(/`([^`]*)`/g, "$1")
     .replace(/(\*\*|__|\*|_)(\S(?:.*?\S)?)\1/g, "$2");
   const end = plain.search(/[.!?](\s|$)/);

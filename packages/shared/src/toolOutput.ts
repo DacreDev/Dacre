@@ -300,7 +300,7 @@ export function toolOutputIndicatesFailure(text: string): boolean {
       (/cannot find path/i.test(text) && /because it does not exist/i.test(text)) ||
       (/is not recognized/i.test(text) && /the term '/i.test(text)) ||
       /exit(?:ed)? with exit code\s+[1-9]\d*/i.test(text) ||
-      /exit code\s*[:\s]\s*[1-9]\d*\b/i.test(text))
+      /exit code(?:\s*:|\s)\s*[1-9]\d*\b/i.test(text))
   );
 }
 
@@ -312,6 +312,15 @@ export function commandRunsTests(command: string): boolean {
   return TEST_COMMAND_PATTERN.test(command);
 }
 
+// A "=== N failed ... ===" line. Only the first count on a line is tried: a regex tail
+// would retry it after every later count, quadratically.
+function pytestSummary(output: string): RegExpMatchArray | undefined {
+  for (const match of output.matchAll(/^=[^\n]*?\b(\d+) failed\b([^\n]*)/gm)) {
+    if (/=\s*$/m.test(match[2]!)) return match;
+  }
+  return undefined;
+}
+
 /**
  * Failed test count from common runner summaries (vitest, jest, bun, pytest,
  * cargo, go). Undefined when the output names no count.
@@ -321,7 +330,7 @@ export function countFailedTests(output: string): number | undefined {
     /^\s*Tests?:?\s+(\d+)\s+failed\b/im.exec(output) ??
     /^\s*(\d+)\s+fail\b/m.exec(output) ??
     /\btest result: FAILED\.[^\n]*?\b(\d+) failed\b/i.exec(output) ??
-    /^=+[^\n]*?\b(\d+) failed\b[^\n]*=+\s*$/m.exec(output);
+    pytestSummary(output);
   if (summary) {
     const count = Number(summary[1]);
     return Number.isSafeInteger(count) && count > 0 ? count : undefined;

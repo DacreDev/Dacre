@@ -278,10 +278,12 @@ export const buildSshChildEnvironment = Effect.fn("ssh/auth.buildSshChildEnviron
 export function isSshAuthFailure(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
   const normalized = message.toLowerCase();
-  return (
-    /permission denied \((?:publickey|password|keyboard-interactive|hostbased|gssapi-with-mic)[^)]*\)/u.test(
+  const denied =
+    /permission denied \((?:publickey|password|keyboard-interactive|hostbased|gssapi-with-mic)/u.exec(
       normalized,
-    ) ||
+    );
+  return (
+    (denied !== null && normalized.includes(")", denied.index + denied[0].length)) ||
     /authentication failed/u.test(normalized) ||
     /too many authentication failures/u.test(normalized)
   );
@@ -290,7 +292,14 @@ export function isSshAuthFailure(error: unknown): boolean {
 // A local agent signing failure cannot be remedied by the remote account password.
 export function isSshAgentSigningFailure(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
-  return /sign_and_send_pubkey: signing failed(?: for [^\n]* from agent:|: (?:agent refused operation|communication with agent failed))/u.test(
-    message,
+  const failedFor = "sign_and_send_pubkey: signing failed for ";
+  return (
+    /sign_and_send_pubkey: signing failed: (?:agent refused operation|communication with agent failed)/u.test(
+      message,
+    ) ||
+    message.split("\n").some((line) => {
+      const at = line.indexOf(failedFor);
+      return at !== -1 && line.includes(" from agent:", at + failedFor.length);
+    })
   );
 }

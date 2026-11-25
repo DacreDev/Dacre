@@ -1,5 +1,5 @@
 export function proposedPlanTitle(planMarkdown: string): string | null {
-  const heading = planMarkdown.match(/^\s{0,3}#{1,6}\s+(.+)$/m)?.[1]?.trim();
+  const heading = planMarkdown.match(/^\s{0,3}#{1,6}\s+(\S.*)$/m)?.[1]?.trim();
   return heading && heading.length > 0 ? heading : null;
 }
 
@@ -9,7 +9,7 @@ export function stripDisplayedPlanMarkdown(planMarkdown: string): string {
   while (lines[start]?.trim().length === 0) {
     start += 1;
   }
-  const firstHeadingMatch = lines[start]?.match(/^\s{0,3}#{1,6}\s+(.+)$/);
+  const firstHeadingMatch = lines[start]?.match(/^\s{0,3}#{1,6}\s+(\S.*)$/);
   if (firstHeadingMatch?.[1]?.trim().toLowerCase() === "summary") {
     start += 1;
     while (lines[start]?.trim().length === 0) {

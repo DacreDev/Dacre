@@ -102,7 +102,7 @@ describe("theme import text", () => {
     };
     const source = JSON.stringify(nativeTheme);
     expect(parseThemeImport(source)).toEqual(parseThemeFile(nativeTheme));
-    expect(() => parseThemeImport(source.replace("{", "{ /* native theme */"))).toThrow();
+    expect(() => parseThemeImport("{ /* native theme */" + source.slice(1))).toThrow();
     expect(() => parseThemeImport(source.slice(0, -1) + ",}")).toThrow();
   });
 

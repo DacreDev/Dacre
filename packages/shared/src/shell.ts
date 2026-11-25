@@ -484,7 +484,13 @@ function trimPathEntry(entry: string, platform: NodeJS.Platform): string {
 
 // POSIX PATH entries are literal: whitespace and quotes are part of the directory name.
 function normalizePathEntry(entry: string, platform: NodeJS.Platform): string {
-  return platform === "win32" ? entry.trim().replace(/^"+|"+$/g, "") : entry;
+  if (platform !== "win32") return entry;
+  const trimmed = entry.trim();
+  let start = 0;
+  let end = trimmed.length;
+  while (trimmed[start] === '"') start++;
+  while (end > start && trimmed[end - 1] === '"') end--;
+  return trimmed.slice(start, end);
 }
 
 function pathDelimiterForPlatform(platform: NodeJS.Platform): string {

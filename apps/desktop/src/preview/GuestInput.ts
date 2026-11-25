@@ -346,10 +346,14 @@ export const sendPageCommand = async (
       const commands = Array.isArray(params["commands"])
         ? params["commands"].filter((command) => EDITING_COMMANDS.has(command))
         : [];
+      const commandList = JSON.stringify(commands).replace(
+        /[<>/\u2028\u2029]/g,
+        (char) => `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`,
+      );
       // Runs after the page handles the keys, so the reply also waits for them.
       await evaluate(
         debuggee,
-        `(() => { const doc = ${FOCUSED_DOCUMENT}; for (const name of ${JSON.stringify(commands)}) doc?.execCommand(name); return 0; })()`,
+        `(() => { const doc = ${FOCUSED_DOCUMENT}; for (const name of ${commandList}) doc?.execCommand(name); return 0; })()`,
       );
       return {};
     }

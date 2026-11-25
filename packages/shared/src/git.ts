@@ -9,7 +9,7 @@ import type {
 import * as Arr from "effect/Array";
 import * as Result from "effect/Result";
 
-import { foldLatinDiacritics } from "./path.ts";
+import { foldLatinDiacritics, trimEndChars } from "./path.ts";
 
 export const WORKTREE_BRANCH_PREFIX = "dacre";
 const TEMP_WORKTREE_HEX_TOKEN = "[0-9a-f]{8}";
@@ -45,7 +45,7 @@ export function formatGeneratedBranchName(raw: string, naming?: BranchNamingOpti
       part
         .replace(/[^a-zA-Z0-9_-]+/g, "-")
         .replace(/-+/g, "-")
-        .replace(/^-+|-+$/g, ""),
+        .replace(/^-|-$/g, ""),
     )
     .filter(Boolean)
     .join("/");
@@ -140,7 +140,7 @@ export function canonicalRepositoryPath(path: string): string {
 }
 
 function lowerCaseRemote(value: string, dropSuffix = stripGitSuffix): string {
-  return dropSuffix(value.trim().replace(/\/+$/g, "")).toLowerCase();
+  return dropSuffix(trimEndChars(value.trim(), "/")).toLowerCase();
 }
 
 /**
@@ -270,9 +270,9 @@ export function isBareGitConfig(configText: string): boolean {
   for (const rawLine of gitConfigLines(configText)) {
     let line = rawLine.trim();
     // Git accepts the first setting on the section header's own line.
-    const header = /^\[\s*([^\]]*?)\s*\](.*)$/.exec(line);
+    const header = /^\[([^\]]*)\](.*)$/.exec(line);
     if (header !== null) {
-      inCore = header[1]!.toLowerCase() === "core";
+      inCore = header[1]!.trim().toLowerCase() === "core";
       line = header[2]!.trim();
     }
     if (!inCore) continue;
@@ -302,7 +302,7 @@ export function parseOriginUrlFromGitConfig(configText: string): string | null {
       continue;
     }
     if (section === null) continue;
-    const match = /^url\s*=\s*(.*)$/i.exec(line);
+    const match = /^url\s*=\s*(\S.*)?$/i.exec(line);
     if (!match) continue;
     const url = parseGitConfigValue(match[1] ?? "");
     if (url.length === 0) continue;

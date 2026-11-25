@@ -1071,7 +1071,10 @@ export function hubRoutes(
   // Claude Code's 1M-context suffix is not part of the model id a hub routes.
   const full = model?.replace(/\[1m\]$/i, "");
   // The hub routes a thinking suffix such as "gpt-5.2(high)" by its base model when one lists it.
-  const base = full?.replace(/\([^)]*\)$/, "");
+  const open = full?.endsWith(")")
+    ? full.indexOf("(", full.lastIndexOf(")", full.length - 2) + 1)
+    : -1;
+  const base = open >= 0 ? full?.slice(0, open) : full;
   const lists = (id: string | undefined) =>
     sources.some((source) => source.accounts.some((account) => account.models?.includes(id ?? "")));
   const slug = lists(base) ? base : full;

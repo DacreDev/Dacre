@@ -232,7 +232,7 @@ export function getCloneDirectoryName(repositoryOrRemoteUrl: string | null | und
     !trimmed.includes("://") && (isHostPath(trimmed) || isExplicitRelativePath(trimmed));
   const withoutQuery = isLocalPath ? trimmed : (trimmed.split(/[?#]/)[0] ?? "");
   const schemeIndex = withoutQuery.indexOf("://");
-  const hasHost = schemeIndex >= 0 || /^[^/\\:]+@[^/\\:]+:/.test(withoutQuery);
+  const hasHost = schemeIndex >= 0 || /^[^/\\:][^/\\:@]*@[^/\\:]+:/.test(withoutQuery);
   const pathPart = schemeIndex >= 0 ? withoutQuery.slice(schemeIndex + "://".length) : withoutQuery;
   const segments = pathPart.split(/[/\\:]+/).filter((segment) => segment.trim().length > 0);
   if (hasHost && segments.length < 2) {

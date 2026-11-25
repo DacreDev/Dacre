@@ -11,6 +11,7 @@ import {
 } from "@dacre/contracts";
 
 import { expandAssistantCitationsForProvider } from "./assistantCitations.ts";
+import { trimEndChars } from "./path.ts";
 import { replaceThreadLinks, threadLinkCandidates } from "./threadLinks.ts";
 
 const CONTEXT_PROTOCOL = "dacre-context:";
@@ -38,10 +39,10 @@ function fnv1a64(value: string): string {
 
 export function toComposerContextId(producerId: string): ComposerContextId {
   if (CONTEXT_ID_PATTERN.test(producerId)) return producerId as ComposerContextId;
-  const slug = producerId
-    .replace(/[^a-z0-9_-]+/gi, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 48);
+  const slug = trimEndChars(
+    producerId.replace(/[^a-z0-9_-]+/gi, "-").replace(/^-+/, ""),
+    "-",
+  ).slice(0, 48);
   return `${slug || "ctx"}-${fnv1a64(producerId)}` as ComposerContextId;
 }
 
@@ -335,7 +336,7 @@ function formatComposerContextProviderPayload(record: KnownComposerContextRecord
       ];
       if (record.text.trim()) lines.push("comment:", indent(record.text.trim()));
       if (record.diff.trim()) {
-        lines.push(`${record.fenceLanguage ?? "diff"}:`, indent(record.diff.replace(/\n+$/, "")));
+        lines.push(`${record.fenceLanguage ?? "diff"}:`, indent(trimEndChars(record.diff, "\n")));
       }
       return lines.join("\n");
     }

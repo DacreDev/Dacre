@@ -326,9 +326,9 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("Antigravity inst
           phase: "succeeded",
           installedVersion: "1.5.7",
         });
-        expect(restarted.requests.filter((url) => url.includes("storage.googleapis.com"))).toEqual(
-          [],
-        );
+        expect(
+          restarted.requests.filter((url) => new URL(url).hostname === "storage.googleapis.com"),
+        ).toEqual([]);
         expect((yield* restarted.installation.resolve()).executablePath).toBe(
           resolved.executablePath,
         );
@@ -501,7 +501,9 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("Antigravity inst
         phase: "succeeded",
         installedVersion: "1.5.8",
       });
-      expect(offline.requests.filter((url) => url.includes("storage.googleapis.com"))).toEqual([]);
+      expect(
+        offline.requests.filter((url) => new URL(url).hostname === "storage.googleapis.com"),
+      ).toEqual([]);
     }),
   );
 
@@ -533,7 +535,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("Antigravity inst
       // Without an acceptable release, start re-verifies the installed one.
       if (result._tag === "Success") yield* terminalState(installation);
       expect(validations.map(({ version }) => version)).not.toContain("1.5.7");
-      expect(requests.some((url) => url.startsWith("https://example.com"))).toBe(false);
+      expect(requests.some((url) => new URL(url).origin === "https://example.com")).toBe(false);
       yield* expectPreviousRelease(installation);
     }),
   );

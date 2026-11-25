@@ -3,6 +3,7 @@ import {
   isNetworkPath,
   isWindowsAbsolutePath,
   stripSlashPrefixedWindowsDrive,
+  trimEndChars,
   workspaceRelativeFilePath,
 } from "./path.ts";
 import {
@@ -222,11 +223,7 @@ export function inlineCodeFilePathCandidate(codeText: string): string | null {
     if (withoutPosition.endsWith("/")) return null;
     const firstSegment = withoutPosition.split("/")[0] ?? withoutPosition;
     if (looksLikeHostname(firstSegment, hasPosition)) return null;
-    const basename =
-      withoutPosition
-        .replace(/[/\\]+$/, "")
-        .split(/[\\/]/)
-        .at(-1) ?? "";
+    const basename = trimEndChars(withoutPosition, "/\\").split(/[\\/]/).at(-1) ?? "";
     if (VERSION_SUFFIX_PATTERN.test(basename)) return null;
     if (!FILE_EXTENSION_PATTERN.test(basename)) {
       if (!hasPosition) return EXTENSIONLESS_FILE_NAMES.has(basename) ? candidate : null;
@@ -296,7 +293,7 @@ export type MarkdownImageSource =
 
 function joinWorkspacePath(workspaceRoot: string, relativePath: string): string {
   const separator = isWindowsAbsolutePath(workspaceRoot) ? "\\" : "/";
-  const root = workspaceRoot.replace(/[\\/]+$/, "");
+  const root = trimEndChars(workspaceRoot, "/\\");
   const path = relativePath.replace(/[\\/]/g, separator).replace(/^[\\/]+/, "");
   return `${root}${separator}${path}`;
 }

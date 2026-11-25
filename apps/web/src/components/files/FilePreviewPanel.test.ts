@@ -16,6 +16,16 @@ import {
 
 const decodeReadError = Schema.decodeSync(ProjectReadFileError);
 
+const textOf = (html: string) => {
+  let text = html;
+  let previous;
+  do {
+    previous = text;
+    text = text.replaceAll(/<[^>]*>/g, "");
+  } while (text !== previous);
+  return text;
+};
+
 describe("file preview read errors", () => {
   // regression: #15628 read errors from servers without attempted paths keep their own message
   it("preserves the public message from older servers", () => {
@@ -177,7 +187,7 @@ describe("document preview contents", () => {
   ])("keeps the text of %s", (_name, source, expected) => {
     const result = openRtf(bytes(source));
     if (result.type !== "document") throw new Error("Expected document");
-    expect(result.pages[0]!.html.replaceAll(/<[^>]*>/g, "")).toBe(expected);
+    expect(textOf(result.pages[0]!.html)).toBe(expected);
   });
 
   it.each(["?", String.raw`\'3f`, String.raw`\\`])(
@@ -214,7 +224,7 @@ describe("document preview contents", () => {
     expect(result.type).toBe("document");
     if (result.type !== "document") throw new Error("Expected document");
     const html = result.pages[0]!.html;
-    expect(html.replaceAll(/<[^>]*>/g, "")).toBe("Hello boldUnicode: αvisible");
+    expect(textOf(html)).toBe("Hello boldUnicode: αvisible");
     expect(html).toContain("<strong>");
     expect(html).not.toContain("https:");
     const styled = openRtf(

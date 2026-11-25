@@ -27,7 +27,7 @@ const THEME_STORAGE_KEY = "dacre:theme";
 const DEFAULT_DARK_SIDEBAR = getDefaultThemeColors("dark").sidebar;
 
 const bootScript = (() => {
-  const match = indexHtml.match(/<script>([\s\S]*?)<\/script>/);
+  const match = indexHtml.match(/<script\b[^>]*>([\s\S]*?)<\/script\b[^>]*>/i);
   if (!match?.[1]) throw new Error("Could not find the inline boot script in index.html");
   return match[1];
 })();

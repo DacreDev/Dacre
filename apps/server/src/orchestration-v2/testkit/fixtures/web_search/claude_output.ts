@@ -52,7 +52,9 @@ export function assertClaudeWebSearchOutput(
   assert.include(webSearch.patterns ?? [], CLAUDE_WEB_SEARCH_QUERY);
   assert.isAtLeast(webSearch.results?.length ?? 0, 1);
   assert.isTrue(
-    webSearch.results?.some((entry) => entry.url?.includes("fifa.com")) ?? false,
+    webSearch.results?.some(
+      (entry) => entry.url !== undefined && new URL(entry.url).hostname === "www.fifa.com",
+    ) ?? false,
     "Claude web search should project structured result URLs",
   );
 }

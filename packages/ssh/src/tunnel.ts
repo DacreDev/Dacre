@@ -254,6 +254,12 @@ function stripTrailingNewlines(value: string): string {
   return value.replace(/\n+$/u, "");
 }
 
+function stripTrailingSlashes(value: string): string {
+  let end = value.length;
+  while (value[end - 1] === "/") end -= 1;
+  return value.slice(0, end);
+}
+
 function applyScriptPlaceholders(
   template: string,
   replacements: Readonly<Record<string, string>>,
@@ -1162,7 +1168,7 @@ export function buildRemoteDacreRunnerScript(input?: RemoteDacreRunnerOptions): 
   if (archiveVersion !== "" && !EXACT_ARCHIVE_VERSION.test(archiveVersion)) {
     throw new SshInvalidArchiveVersionError({ archiveVersion });
   }
-  const releaseBaseUrl = input?.releaseBaseUrl?.trim().replace(/\/+$/u, "") ?? "";
+  const releaseBaseUrl = stripTrailingSlashes(input?.releaseBaseUrl?.trim() ?? "");
   return stripTrailingNewlines(
     applyScriptPlaceholders(REMOTE_RUNNER_SCRIPT, {
       DA_NODE_SCRIPT_PATH: shellSingleQuote(nodeScriptPath),

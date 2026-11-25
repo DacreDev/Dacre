@@ -136,7 +136,9 @@ export type ToolGroupSummaryKind =
   | "mixed";
 
 export function normalizeCompactToolLabel(value: string): string {
-  return value.replace(/\s+(?:complete|completed)\s*$/i, "").trim();
+  const end = value.trimEnd();
+  const suffix = /\scompleted?$/i.exec(end);
+  return (suffix === null ? end : end.slice(0, suffix.index)).trim();
 }
 
 function workEntryToolName(
@@ -838,10 +840,28 @@ export function toolGroupSummaryKind(
   return fallbackKinds.size === 1 ? fallbackKinds.values().next().value! : "mixed";
 }
 
+// `text.replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")` without rescanning to the end from every `[`.
+function withoutMarkdownLinks(text: string): string {
+  let kept = "";
+  let from = 0;
+  let search = 0;
+  for (let open = text.indexOf("["); open !== -1; open = text.indexOf("[", search)) {
+    const close = text.indexOf("]", open + 1);
+    if (close === -1) break;
+    search = close + 1;
+    if (text[close + 1] !== "(") continue;
+    const end = text.indexOf(")", close + 2);
+    if (end === -1) break;
+    const start = open > from && text[open - 1] === "!" ? open - 1 : open;
+    kept += text.slice(from, start) + text.slice(open + 1, close);
+    from = search = end + 1;
+  }
+  return kept + text.slice(from);
+}
+
 export function liveThoughtLine(markdown: string): string {
   const heading = /^\s*\*\*([^*\r\n]+)\*\*[ \t]*\r?(?:\n|$)/.exec(markdown)?.[1];
-  const text = (heading ?? markdown)
-    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
+  const text = withoutMarkdownLinks(heading ?? markdown)
     .replace(/^[ \t]*(?:#{1,6}|[-*+]|\d+\.)[ \t]+/gm, "")
     .replace(/`+|\*\*|~~/g, "")
     .replace(/(^|[^\w*])[*_]([^*_\n]+)[*_](?![\w*])/g, "$1$2")

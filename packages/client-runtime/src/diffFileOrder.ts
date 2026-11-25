@@ -79,7 +79,7 @@ function resolveRelative(fromPath: string, specifier: string): string {
   return segments.join("/");
 }
 
-const IMPORT_SPECIFIER = /(?:\bfrom|\bimport|\brequire\s*\()\s*\(?\s*["']([^"']+)["']/g;
+const IMPORT_SPECIFIER = /(?:\bfrom|\bimport|\brequire\s*\()\s*(?:\(\s*)?["']([^"']+)["']/g;
 
 function importedPaths(
   path: string,
@@ -93,7 +93,7 @@ function importedPaths(
     let match = IMPORT_SPECIFIER.exec(line);
     while (match !== null) {
       // Bundler queries such as `?worker` or `?url` name the same file.
-      const specifier = (match[1] ?? "").replace(/\?.*$/, "");
+      const [specifier = ""] = (match[1] ?? "").split("?", 1);
       const resolved = stripModuleExtension(
         specifier.startsWith(".") ? resolveRelative(path, specifier) : specifier,
       );

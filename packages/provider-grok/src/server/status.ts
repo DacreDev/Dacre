@@ -266,7 +266,7 @@ export function parseGrokModelsCliOutput(output: string): GrokModelsCliOutput {
   const seen = new Set<string>();
   const models: ServerProviderModel[] = [];
   for (const line of output.split(/\r?\n/)) {
-    const bullet = line.match(/^\s*[*-]\s+(\S+)(.*)$/);
+    const bullet = line.match(/^\s*[*-]\s+(\S+)([^\S\n\r\u2028\u2029].*)?$/);
     if (!bullet?.[1]) {
       continue;
     }

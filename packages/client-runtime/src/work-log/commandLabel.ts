@@ -201,7 +201,8 @@ function shellCommandArgumentIndex(tokens: ReadonlyArray<string>, start: number)
       index += 1;
       continue;
     }
-    if (option === "--command" || /^-[a-zA-Z]*c[a-zA-Z]*$/.test(option)) return index + 1;
+    if (option === "--command" || (/^-[a-zA-Z]+$/.test(option) && option.includes("c")))
+      return index + 1;
   }
   return null;
 }

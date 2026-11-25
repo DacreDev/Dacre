@@ -244,8 +244,10 @@ function stringField(value: unknown, key: "message" | "code"): string | undefine
 }
 
 function redactUrl(match: string): string {
-  const trailing = /[),.;!?]+$/u.exec(match)?.[0] ?? "";
-  const candidate = trailing.length === 0 ? match : match.slice(0, -trailing.length);
+  let end = match.length;
+  while (end > 0 && "),.;!?".includes(match[end - 1]!)) end -= 1;
+  const trailing = match.slice(end);
+  const candidate = match.slice(0, end);
   try {
     const url = new URL(candidate);
     url.username = "";

@@ -3,6 +3,7 @@ import {
   isAbsolutePath,
   isWindowsAbsolutePath,
   stripSlashPrefixedWindowsDrive,
+  trimEndChars,
 } from "./path.ts";
 
 const POSITION_SUFFIX_CAPTURE_PATTERN = /:(\d+)(?::(\d+)|-(\d+))?$/;
@@ -79,7 +80,7 @@ function isWindowsPathStyle(value: string): boolean {
 }
 
 function joinPath(base: string, next: string, separator: "/" | "\\"): string {
-  const cleanBase = base.replace(/[\\/]+$/, "");
+  const cleanBase = trimEndChars(base, "/\\");
   if (separator === "\\") {
     return `${cleanBase}\\${next.replaceAll("/", "\\")}`;
   }

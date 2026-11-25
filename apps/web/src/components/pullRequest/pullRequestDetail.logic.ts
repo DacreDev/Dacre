@@ -542,15 +542,25 @@ export interface PullRequestReplyAvailability {
   readonly url: string | null;
 }
 
+// Repeats until stable so removing one comment cannot splice a new `<!--` together.
+function withoutHtmlComments(text: string): string {
+  let result = text;
+  let previous;
+  do {
+    previous = result;
+    result = result.replace(/<!--[\s\S]*?-->/gu, "");
+  } while (result !== previous);
+  return result;
+}
+
 /** Marker-only bodies are empty; otherwise retain text, including fenced HTML comments. */
 export function visibleBody(body: string): string | null {
-  return body.replace(/<!--[\s\S]*?-->/gu, "").trim().length === 0 ? null : body.trim();
+  return withoutHtmlComments(body).trim().length === 0 ? null : body.trim();
 }
 
 /** A body flattened to one plain line, for the quiet peek under a collapsed entry. */
 export function pullRequestBodyPreview(body: string): string {
-  return body
-    .replace(/<!--[\s\S]*?-->/gu, "")
+  return withoutHtmlComments(body)
     .replace(/^\s*>?\s*\[!\w+\]\s*$/gmu, "")
     .replace(/!?(\[([^\]]+)\])\([^)]*\)/gu, "$2")
     .replace(/^[\s>#*-]+/gmu, "")

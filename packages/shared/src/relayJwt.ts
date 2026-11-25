@@ -44,7 +44,10 @@ export class RelayJwtError extends Schema.TaggedError<RelayJwtError>()("RelayJwt
 export type RelayJwtClaims = Readonly<Record<string, Schema.Json>>;
 
 export function normalizeRelayIssuer(value: string): string {
-  return value.trim().replace(/\/+$/gu, "");
+  const trimmed = value.trim();
+  let end = trimmed.length;
+  while (end > 0 && trimmed[end - 1] === "/") end--;
+  return trimmed.slice(0, end);
 }
 
 /** Reads claims without verifying them. Never authorize on the result. */

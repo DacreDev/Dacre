@@ -34,7 +34,13 @@ export function providerInstanceInitials(label: string): string {
   const toWords = (text: string) =>
     text
       .split(/\s+/u)
-      .map((word) => word.replace(/^['’]+|['’]+$/gu, ""))
+      .map((word) => {
+        let start = 0;
+        let end = word.length;
+        while (start < end && "'’".includes(word[start]!)) start += 1;
+        while (end > start && "'’".includes(word[end - 1]!)) end -= 1;
+        return word.slice(start, end);
+      })
       .filter(Boolean);
   let words = toWords(label.replace(/[^\P{P}'’]+/gu, " "));
   if (words.length === 1) words = toWords(words[0]!.replace(/(\p{Ll})(\p{Lu})/gu, "$1 $2"));

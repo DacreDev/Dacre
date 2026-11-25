@@ -120,8 +120,8 @@ function stripTrailingExitCode(value: string | undefined): string | undefined {
   if (!trimmed) {
     return undefined;
   }
-  const match = /^(?<output>[\s\S]*?)(?:\s*<exited with exit code \d+>)\s*$/iu.exec(trimmed);
-  const output = match?.groups?.output?.trim() ?? trimmed;
+  const match = /<exited with exit code \d+>$/iu.exec(trimmed);
+  const output = match ? trimmed.slice(0, match.index).trim() : trimmed;
   return output.length > 0 ? output : undefined;
 }
 
@@ -260,7 +260,7 @@ function normalizeEquivalentValue(value: string | undefined): string | undefined
   }
   return trimmed
     .replace(/\s+/gu, " ")
-    .replace(/\s+(?:complete|completed|started)\s*$/iu, "")
+    .replace(/ (?:complete|completed|started) ?$/iu, "")
     .trim();
 }
 

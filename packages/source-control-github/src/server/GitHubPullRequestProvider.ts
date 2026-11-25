@@ -261,8 +261,16 @@ class SearchCoverage {
   }
 }
 
-const rendersEmpty = (body: string): boolean =>
-  body.replace(/<!--[\s\S]*?-->/g, "").trim().length === 0;
+// Whitespace and closed HTML comments only; an unclosed `<!--` counts as content.
+const rendersEmpty = (body: string): boolean => {
+  let rest = body;
+  for (let open = rest.indexOf("<!--"); open !== -1; open = rest.indexOf("<!--")) {
+    const close = rest.indexOf("-->", open + 4);
+    if (close === -1 || rest.slice(0, open).trim().length > 0) return false;
+    rest = rest.slice(close + 3);
+  }
+  return rest.trim().length === 0;
+};
 
 export const make = Effect.gen(function* () {
   const cli = yield* GitHubPullRequestApi.GitHubPullRequestApi;

@@ -702,7 +702,7 @@ const STDERR_PRINT =
 const CURL_VERBOSE = /\bcurl\b[^|]*\s(?:-[a-zA-Z]*v[a-zA-Z]*|--verbose|--trace\S*)(?=\s|$)/;
 const ASSIGNMENT = /^(\w+)=((?:"(?:\\.|[^"\\])*"|'[^']*'|\$\([^)]*\)|[^\s"'])*)/;
 const withoutAssignments = (stage: string) =>
-  stage.replace(/^(?:\w+=(?:"(?:\\.|[^"\\])*"|'[^']*'|\$\([^)]*\)|\S)*\s+)+/, "");
+  stage.replace(/^(?:\w+=(?:"(?:\\.|[^"\\])*"|'[^']*'|\$\([^)]*\)|\$(?!\()|[^\s"'$])*\s+)+/, "");
 const unquote = (word: string) => word.replace(/^(["'])([\s\S]*)\1$/, "$2");
 /** The command xargs runs: its words after xargs's own options. Empty means echo. */
 const xargsProgram = (head: string) => {

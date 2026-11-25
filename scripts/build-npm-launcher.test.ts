@@ -450,10 +450,14 @@ syncBuiltinESMExports();
         const stuck = "runtime ignored SIGTERM and was still running 30s later";
         const orphaned = "provider outlived the runtime by 30s";
         const provider = `process.on("SIGTERM", () => {}); setTimeout(() => { console.log(${JSON.stringify(orphaned)}); process.exit(0); }, 30_000);`;
+        const providerLiteral = JSON.stringify(provider).replace(
+          /[<>/\u2028\u2029]/g,
+          (char) => `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`,
+        );
         yield* fs.writeFileString(
           path.join(versionDir, "dacre"),
           `#!${process.execPath}
-const provider = require("node:child_process").spawn(process.execPath, ["-e", ${JSON.stringify(provider)}], { stdio: "inherit" });
+const provider = require("node:child_process").spawn(process.execPath, ["-e", ${providerLiteral}], { stdio: "inherit" });
 process.on("SIGTERM", () => setTimeout(() => { console.log(${JSON.stringify(stuck)}); process.exit(0); }, 30_000));
 setInterval(() => {}, 1 << 30);
 console.log(process.pid, provider.pid);

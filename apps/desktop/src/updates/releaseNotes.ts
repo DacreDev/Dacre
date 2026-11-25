@@ -55,16 +55,19 @@ function decodeHtmlEntities(input: string): string {
 }
 
 function stripMarkup(input: string, keepBold = false): string {
-  const markdown = decodeHtmlEntities(
-    input
-      .replace(/<br\s*\/?>/gi, "\n")
-      .replace(/<li\b[^>]*>/gi, "\n- ")
-      .replace(/<h([1-6])\b[^>]*>/gi, (_, level: string) => `\n${"#".repeat(Number(level))} `)
-      .replace(/<\/(?:p|div|li|h[1-6]|ul|ol|blockquote)>/gi, "\n")
-      .replace(/<\/?(?:strong|b)\b[^>]*>/gi, "**")
-      .replace(/<[^>]*>/g, "")
-      .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1"),
-  );
+  let text = input
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<li\b[^>]*>/gi, "\n- ")
+    .replace(/<h([1-6])\b[^>]*>/gi, (_, level: string) => `\n${"#".repeat(Number(level))} `)
+    .replace(/<\/(?:p|div|li|h[1-6]|ul|ol|blockquote)>/gi, "\n")
+    .replace(/<\/?(?:strong|b)\b[^>]*>/gi, "**");
+  let previous;
+  // Repeats until stable so removing one tag cannot splice a new tag together.
+  do {
+    previous = text;
+    text = text.replace(/<[^>]*>/g, "");
+  } while (text !== previous);
+  const markdown = decodeHtmlEntities(text.replace(/\[([^\]]+)\]\([^)]+\)/g, "$1"));
   return keepBold ? markdown : markdown.replace(/\*\*([^*]+)\*\*/g, "$1");
 }
 

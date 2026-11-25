@@ -9,6 +9,7 @@ import {
 import * as Schema from "effect/Schema";
 
 import { formatComposerContextReference } from "./composerContextReferences.ts";
+import { trimEndChars } from "./path.ts";
 
 /** Converts in memory on read; never rewrites event history. */
 
@@ -26,7 +27,8 @@ const TRAILING_PREVIEW =
   /\n*<preview_annotation>\n((?:(?!\n<\/preview_annotation>)[\s\S])*)\n<\/preview_annotation>\s*$/;
 const REVIEW_OR_CONTEXT_BLOCK =
   /<review_comment\b([^>]*)>|^<(terminal_context|element_context|preview_annotation)>\n[\s\S]*?\n<\/\2>/gm;
-const REVIEW_ATTRIBUTE = /([a-zA-Z][a-zA-Z0-9_-]*)="([^"]*)"/g;
+const ELEMENT_OPEN = "<element_context>\n";
+const ELEMENT_CLOSE = "\n</element_context>";
 const REVIEW_FENCE = /(`{3,})([^\s`]*)[^\n]*\n([\s\S]*?)\n\1/g;
 const REVIEW_TOKEN = "\uE000";
 const LEGACY_MARKERS =
@@ -181,8 +183,11 @@ function previewRecord(body: string, index: number): PreviewAnnotationContextRec
   const page = read("Page: ");
   const pageIsUrl = /^https?:\/\//i.test(page);
   const elements: NonNullable<PreviewAnnotationContextRecord["elements"]>[number][] = [];
-  for (const match of body.matchAll(/<element_context>\n([\s\S]*?)\n<\/element_context>/g)) {
-    const entries = parseEntries(match[1] ?? "");
+  let open = body.indexOf(ELEMENT_OPEN);
+  while (open >= 0) {
+    const close = body.indexOf(ELEMENT_CLOSE, open + ELEMENT_OPEN.length);
+    if (close < 0) break;
+    const entries = parseEntries(body.slice(open + ELEMENT_OPEN.length, close));
     if (entries === null) return null;
     for (const entry of entries) {
       const record = elementRecord(entry, elements.length + 1);
@@ -196,6 +201,7 @@ function previewRecord(body: string, index: number): PreviewAnnotationContextRec
       } = record;
       elements.push(details);
     }
+    open = body.indexOf(ELEMENT_OPEN, close + ELEMENT_CLOSE.length);
   }
   return {
     version: 1,
@@ -220,14 +226,38 @@ function unescapeAttribute(value: string): string {
     .replace(/&amp;/g, "&");
 }
 
+const isNameStart = (char: string) => /[a-zA-Z]/.test(char);
+const isNameChar = (char: string) => /[a-zA-Z0-9_-]/.test(char);
+
+// `name="value"` pairs, scanned once; `/([a-zA-Z][a-zA-Z0-9_-]*)="([^"]*)"/g` rescans each name run.
+function* reviewAttributes(raw: string): Generator<readonly [string, string]> {
+  let index = 0;
+  while (index < raw.length) {
+    if (!isNameStart(raw[index]!)) {
+      index += 1;
+      continue;
+    }
+    let nameEnd = index + 1;
+    while (nameEnd < raw.length && isNameChar(raw[nameEnd]!)) nameEnd += 1;
+    if (!raw.startsWith('="', nameEnd)) {
+      index = nameEnd;
+      continue;
+    }
+    const valueEnd = raw.indexOf('"', nameEnd + 2);
+    if (valueEnd < 0) return;
+    yield [raw.slice(index, nameEnd), raw.slice(nameEnd + 2, valueEnd)];
+    index = valueEnd + 1;
+  }
+}
+
 function reviewRecord(
   rawAttributes: string,
   rawBody: string,
   index: number,
 ): ReviewCommentContextRecord | null {
   const attributes: Record<string, string> = {};
-  for (const match of rawAttributes.matchAll(REVIEW_ATTRIBUTE)) {
-    attributes[match[1]!] = unescapeAttribute(match[2] ?? "");
+  for (const [name, value] of reviewAttributes(rawAttributes)) {
+    attributes[name] = unescapeAttribute(value);
   }
   const filePath = attributes.filePath?.trim();
   const sectionId = attributes.sectionId?.trim();
@@ -263,7 +293,7 @@ function stripTrailing(
 ): { text: string; match: RegExpExecArray } | null {
   const match = pattern.exec(text);
   if (!match) return null;
-  return { text: text.slice(0, match.index).replace(/\n+$/, ""), match };
+  return { text: trimEndChars(text.slice(0, match.index), "\n"), match };
 }
 
 /** Review source can contain literal closing tags inside its dynamically sized code fence. */

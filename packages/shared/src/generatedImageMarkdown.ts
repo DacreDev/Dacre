@@ -17,7 +17,9 @@ function imageEmbed(path: string): string {
       : path;
   // Clients split `?`/`#`, decode `%` and `&` entities, and read POSIX backslashes as escapes;
   // line breaks end an angle destination.
-  const escaped = destination.replace(/[%?#&\\\r\n]/g, encodeURIComponent).replace(/[<>]/g, "\\$&");
+  const escaped = destination
+    .replace(/[%?#&\\\r\n]/g, encodeURIComponent)
+    .replace(/[<>\\]/g, "\\$&");
   return `![](<${escaped}>)`;
 }
 

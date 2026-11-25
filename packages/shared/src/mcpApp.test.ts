@@ -255,7 +255,7 @@ describe("mcpAppFromToolItem", () => {
 describe("MCP App cookie bootstrap", () => {
   const vendor = `<script>document.cookie.split(";");document.cookie="analytics=1";document.root="rendered";</script>`;
   const execute = (html: string, document: object) => {
-    for (const script of html.matchAll(/<script>([\s\S]*?)<\/script>/g)) {
+    for (const script of html.matchAll(/<script>([\s\S]*?)<\/script[^>]*>/gi)) {
       NodeVM.runInNewContext(script[1]!, { document });
     }
   };

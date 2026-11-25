@@ -62,8 +62,8 @@ function parseGitLabAuth(input: SourceControlAuthProbeInput) {
   const account =
     authenticatedHost?.account ??
     matchFirst(output, [
-      /Logged in to .* as\s+([^\s(]+)/iu,
-      /Logged in to .* account\s+([^\s(]+)/iu,
+      /Logged in to \S+ as\s+([^\s(]+)/iu,
+      /Logged in to \S+ account\s+([^\s(]+)/iu,
       /account:\s*([^\s(]+)/iu,
     ]);
   const host = authenticatedHost?.host ?? parseCliHost(output);

@@ -931,7 +931,7 @@ const codexCall = (name: string, input: unknown) => {
           : `python3 -c ${JSON.stringify(`from pathlib import Path; p=Path(${JSON.stringify(file)}); p.write_text(p.read_text().replace(${JSON.stringify(args.old_string)}, ${JSON.stringify(args.new_string)}))`)}`;
     return `text(await tools.exec_command(${JSON.stringify({ cmd: command })}));`;
   }
-  return `text(await tools.${name.replace("mcp__dacre__", "mcp__dacre__")}(${JSON.stringify(input)}));`;
+  return `text(await tools.${name}(${JSON.stringify(input)}));`;
 };
 const codexMessages = (messages: ReadonlyArray<ApiMessage>): Array<Block> =>
   messages.flatMap((message) =>
@@ -2762,7 +2762,7 @@ export const executeCodex = async (
 
 const codexCatalog = (base: Base) => [
   ...base.dacre.map((tool) => ({
-    name: tool.name.replace("mcp__dacre__", "mcp__dacre__"),
+    name: tool.name,
     description: `${valueText(tool.description)}\nInput JSON schema: ${JSON.stringify(tool.input_schema)}`,
   })),
   ...[

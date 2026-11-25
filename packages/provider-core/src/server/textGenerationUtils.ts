@@ -27,7 +27,9 @@ export function limitSection(value: string, maxChars: number): string {
 
 export function sanitizeCommitSubject(raw: string): string {
   const singleLine = raw.trim().split(/\r?\n/g)[0]?.trim() ?? "";
-  const withoutTrailingPeriod = singleLine.replace(/[.]+$/g, "").trim();
+  let end = singleLine.length;
+  while (singleLine[end - 1] === ".") end -= 1;
+  const withoutTrailingPeriod = singleLine.slice(0, end).trim();
   if (withoutTrailingPeriod.length === 0) {
     return "Update project files";
   }

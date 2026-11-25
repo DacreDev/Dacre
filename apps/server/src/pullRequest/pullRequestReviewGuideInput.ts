@@ -4,10 +4,14 @@ import type { ReviewGuideGenerationInput } from "@dacre/provider-core/server/tex
 const SETTLED_REMARK_CHARS = 200;
 
 function oneLine(text: string): string {
-  const flat = text
-    .replace(/<!--[\s\S]*?-->/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
+  let uncommented = text;
+  let previous;
+  // Repeats until stable so removing one comment cannot splice a new `<!--` together.
+  do {
+    previous = uncommented;
+    uncommented = uncommented.replace(/<!--[\s\S]*?-->/g, "");
+  } while (uncommented !== previous);
+  const flat = uncommented.replace(/\s+/g, " ").trim();
   return flat.length > SETTLED_REMARK_CHARS ? `${flat.slice(0, SETTLED_REMARK_CHARS)}…` : flat;
 }
 

@@ -3,6 +3,7 @@
 import type { OrchestrationV2ThreadOpens } from "@dacre/contracts";
 
 import { WORKTREE_BRANCH_PREFIX } from "./git.ts";
+import { trimEndChars } from "./path.ts";
 
 const ALPHANUMERIC = /[\p{L}\p{N}]/u;
 const LOWERCASE = /\p{Ll}/u;
@@ -132,11 +133,17 @@ function prepareSearchField(source: string): SearchField {
 }
 
 // Quotes around a pasted query: "fix sidebar".
-const WRAPPING_QUOTES = /^\s*["'`“”‘’]+|["'`“”‘’]+\s*$/g;
+const QUOTES = "\"'`“”‘’";
+const LEADING_QUOTES = /^\s*["'`“”‘’]+/;
+
+// Callers split on whitespace, so trailing whitespace may go too.
+function stripWrappingQuotes(query: string): string {
+  return trimEndChars(query.replace(LEADING_QUOTES, "").trimEnd(), QUOTES);
+}
 
 /** Folded, whitespace-collapsed query; empty when there is nothing to match. */
 export function foldSearchQuery(query: string): string {
-  return foldInPlace(query.replace(WRAPPING_QUOTES, "").normalize("NFC"))
+  return foldInPlace(stripWrappingQuotes(query).normalize("NFC"))
     .split(/\s+/)
     .filter((token) => token.length > 0)
     .join(" ");
@@ -470,8 +477,7 @@ export function messageSearchTokens(query: string): {
   /** Every token, in the order typed. */
   readonly words: ReadonlyArray<string>;
 } {
-  const tokens = query
-    .replace(WRAPPING_QUOTES, "")
+  const tokens = stripWrappingQuotes(query)
     // The index stores apostrophes straight, as `indexedMessageText` writes them.
     .replace(CURLY_APOSTROPHES, "'")
     .normalize("NFC")
